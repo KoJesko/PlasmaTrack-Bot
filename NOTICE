@@ -1,0 +1,13 @@
+Required Notice: Copyright (c) 2026 Ari Kotler
+
+PlasmaTrack Bot is licensed under the PolyForm Noncommercial License 1.0.0 (LICENSE.md).
+Reuse and modification are allowed for noncommercial purposes only.
+
+Note: this license is a placeholder until licensing is settled with the client.
+
+Third-party components keep their own licenses (see THIRD_PARTY_NOTICES.md).
+
+Route images are drawn over basemap tiles that each operator generates from their own
+game install with truckermudgeon/maps (GPL-3.0). No truckermudgeon/maps code or styles
+are included in this repository. SCS Software's map data is used for modding purposes
+only; PlasmaTrack is not affiliated with SCS Software and must stay non-commercial.

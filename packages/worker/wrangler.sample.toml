@@ -1,0 +1,51 @@
+# PlasmaTrack bot: Cloudflare Worker configuration.
+# Copy to wrangler.toml (git-ignored) and fill in your own IDs. See docs/DEPLOY.md.
+#
+# Secrets are NOT set here. Set them with:
+#   npx wrangler secret put DISCORD_BOT_TOKEN
+#   npx wrangler secret put RENDERER_KEY
+# For `wrangler dev`, put them in .dev.vars instead (see .dev.vars.example).
+
+name = "plasmatrack-bot"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# Serves POST /interactions (Discord) and GET /healthz.
+# Point the Discord application's "Interactions Endpoint URL" at
+# https://<your-worker-host>/interactions
+
+[[d1_databases]]
+binding = "DB"
+database_name = "plasmatrack-bot"
+database_id = "<from `npx wrangler d1 create plasmatrack-bot`>"
+migrations_dir = "migrations"
+
+# Rendered route/chart PNG cache. Add an R2 lifecycle rule (e.g. delete after 30 days).
+[[r2_buckets]]
+binding = "RENDER_CACHE"
+bucket_name = "plasmatrack-render-cache"
+
+# Deferred work: everything slower than Discord's 3-second window.
+[[queues.producers]]
+binding = "WORK_QUEUE"
+queue = "plasmatrack-work"
+
+[[queues.consumers]]
+queue = "plasmatrack-work"
+max_batch_size = 10
+max_batch_timeout = 1   # seconds; keep low, users are waiting on "thinking…"
+max_retries = 5
+# dead_letter_queue = "plasmatrack-work-dlq"
+
+# Daily cleanup of expired dedupe rows and notices.
+[triggers]
+crons = ["17 3 * * *"]
+
+[vars]
+DISCORD_APPLICATION_ID = "<application id>"
+DISCORD_PUBLIC_KEY = "<application public key, 64 hex chars>"
+DISCORD_GUILD_ID = "<the PlasmaTrack server id>"
+# Comma-separated role IDs allowed to use moderator commands.
+MODERATOR_ROLE_IDS = "<role id>,<role id>"
+NOTICE_TTL_DAYS = "30"
+RENDERER_URL = "https://<your renderer host>"

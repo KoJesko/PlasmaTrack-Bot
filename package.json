@@ -1,0 +1,30 @@
+{
+  "name": "plasmatrack-bot",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/core",
+    "packages/worker",
+    "packages/renderer"
+  ],
+  "scripts": {
+    "license-audit": "node scripts/license-audit.mjs",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces",
+    "check": "npm run license-audit && npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "allowScripts": {
+    "@maplibre/maplibre-gl-native@6.4.1": true,
+    "esbuild@0.28.1": true,
+    "workerd@1.20260815.1": true,
+    "workerd@1.20260926.1": true
+  }
+}

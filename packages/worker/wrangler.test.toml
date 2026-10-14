@@ -1,0 +1,32 @@
+# Used only by the test suite (Miniflare). Not deployable: IDs are placeholders.
+name = "plasmatrack-bot-test"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "plasmatrack-bot-test"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "RENDER_CACHE"
+bucket_name = "plasmatrack-render-cache-test"
+
+[[queues.producers]]
+binding = "WORK_QUEUE"
+queue = "plasmatrack-work-test"
+
+[[queues.consumers]]
+queue = "plasmatrack-work-test"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+
+[vars]
+DISCORD_APPLICATION_ID = "100000000000000001"
+DISCORD_GUILD_ID = "200000000000000002"
+MODERATOR_ROLE_IDS = "300000000000000003"
+NOTICE_TTL_DAYS = "30"
+RENDERER_URL = "https://renderer.test"
+# DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN and RENDERER_KEY are injected by vitest.config.ts.

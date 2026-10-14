@@ -1,0 +1,26 @@
+node_modules/
+dist/
+.wrangler/
+coverage/
+
+# Local config and secrets (samples live in config/ and next to each package)
+.dev.vars
+.env
+.env.*
+!.env.example
+packages/worker/wrangler.toml
+packages/renderer/renderer.toml
+
+# Game-derived basemap tiles are never committed
+*.pmtiles
+*.mbtiles
+tiles/
+
+# Renderer debug output
+packages/renderer/out/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

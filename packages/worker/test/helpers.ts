@@ -1,0 +1,49 @@
+import { env } from 'cloudflare:test';
+import type { QueueMessage } from '@plasmatrack/core';
+import type { Env } from '../src/env.ts';
+
+export const USER_A = '400000000000000004';
+export const USER_B = '500000000000000005';
+export const MOD_ROLE = '300000000000000003';
+export const GUILD_ID = '200000000000000002';
+export const INTERACTION_TOKEN = 'aW50ZXJhY3Rpb246dGVzdC10b2tlbg';
+
+export async function signedRequest(body: unknown, opts: { tamper?: boolean; path?: string } = {}): Promise<Request> {
+  const key = await crypto.subtle.importKey('jwk', JSON.parse(env.TEST_SIGNING_JWK), { name: 'Ed25519' }, false, ['sign']);
+  const raw = JSON.stringify(body);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', key, new TextEncoder().encode(timestamp + raw)));
+  const hex = [...sig].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return new Request(`https://bot.test${opts.path ?? '/interactions'}`, {
+    method: 'POST',
+    headers: { 'X-Signature-Ed25519': hex, 'X-Signature-Timestamp': timestamp, 'Content-Type': 'application/json' },
+    body: opts.tamper ? raw.replace('}', ',"x":1}') : raw,
+  });
+}
+
+export function command(name: string, opts: { user?: string; roles?: string[]; dm?: boolean } = {}) {
+  const user = { id: opts.user ?? USER_A, username: 'driver', discriminator: '0', global_name: null, avatar: null };
+  return {
+    id: '600000000000000006',
+    application_id: '100000000000000001',
+    type: 2,
+    token: INTERACTION_TOKEN,
+    version: 1,
+    data: { id: '700000000000000007', name, type: 1, options: [] },
+    ...(opts.dm
+      ? { user }
+      : { guild_id: GUILD_ID, member: { user, roles: opts.roles ?? [], permissions: '0', joined_at: '2026-01-01T00:00:00Z', deaf: false, mute: false } }),
+  };
+}
+
+/** An env whose queue records sends instead of delivering them. */
+export function envWithRecordingQueue(): { testEnv: Env; sent: QueueMessage[] } {
+  const sent: QueueMessage[] = [];
+  const queue = {
+    send: async (m: QueueMessage) => {
+      sent.push(m);
+    },
+    sendBatch: async () => {},
+  } as unknown as Queue<QueueMessage>;
+  return { testEnv: { ...env, WORK_QUEUE: queue }, sent };
+}
