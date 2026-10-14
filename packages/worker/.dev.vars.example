@@ -3,3 +3,8 @@ DISCORD_BOT_TOKEN=
 # Shared HMAC key with the renderer; at least 32 random characters.
 # e.g. node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 RENDERER_KEY=
+# The PlasmaTrack server's bot token (server API_CONVENTIONS §2). Only with PLASMATRACK_API_URL.
+# PLASMATRACK_BOT_TOKEN=
+# Webhook signing secret, the same value as in the server's settings (32 random bytes,
+# base64url). Comma-separate two during a rotation.
+# PLASMATRACK_WEBHOOK_SECRET=

@@ -120,6 +120,14 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
       };
     case 'modal':
       return { response: { type: InteractionResponseType.Modal, data: result.modal }, background: [] };
+    case 'update':
+      return {
+        response: {
+          type: InteractionResponseType.UpdateMessage,
+          data: { allowed_mentions: { parse: [] }, ...result.message },
+        },
+        background: [],
+      };
     case 'defer':
     case 'defer-update': {
       const message: QueueMessage = { type: 'interaction-task', task: result.task, interaction: ref, noticeHint: isCommand };

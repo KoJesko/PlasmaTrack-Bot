@@ -13,7 +13,7 @@ describe('buildCommandRegistration', () => {
   ]);
 
   it('registers player commands globally for the guild and bot DMs', () => {
-    expect(reg.global.map((c) => c.name).sort()).toEqual(['about', 'notices']);
+    expect(reg.global.map((c) => c.name).sort()).toEqual(['about', 'job', 'jobs', 'leaderboard', 'name', 'notices', 'profile', 'token']);
     for (const c of reg.global) {
       expect(c.contexts).toEqual([0, 1]);
       expect(c.integration_types).toEqual([0]);

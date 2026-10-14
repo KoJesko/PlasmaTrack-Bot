@@ -59,7 +59,7 @@ export const ROUTE_EXTRAS = ['uncounted', 'ferry_train', 'teleport', 'gap', 'rev
 export type RouteExtra = (typeof ROUTE_EXTRAS)[number];
 
 export const ROUTE_EXTRA_LABELS: Record<RouteExtra, string> = {
-  uncounted: 'Not counted (e.g. empty drive to pickup)',
+  uncounted: 'Faded: not counted (e.g. empty drive to pickup)',
   ferry_train: 'Ferry or train',
   teleport: 'Teleport (no distance)',
   gap: 'Missing data',

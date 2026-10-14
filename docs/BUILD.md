@@ -39,8 +39,9 @@ This runs, in order:
 
 Per package:
 
-    npm test -w @plasmatrack/core       # interaction routing, tasks, signing, client (Node)
-    npm test -w @plasmatrack/worker     # entry point, D1/R2/Queues adapters (workerd)
+    npm test -w @plasmatrack/core       # routing, tasks, signing, renderer client, server API client
+                                        # (against an in-memory mock of the contract), webhooks (Node)
+    npm test -w @plasmatrack/worker     # entry point, webhooks endpoint, D1/R2/Queues adapters (workerd)
     npm test -w @plasmatrack/renderer   # tile stripping, pixel checks on real renders, HTTP service
     npm run build -w @plasmatrack/worker  # bundle the Worker (wrangler dry run, no upload)
 
@@ -62,6 +63,7 @@ Check it: `curl http://127.0.0.1:8788/healthz` → `{"ok":true,"basemaps":{...}}
     cd packages/worker
     cp wrangler.sample.toml wrangler.toml     # fill in IDs (docs/DEPLOY.md)
     cp .dev.vars.example .dev.vars            # DISCORD_BOT_TOKEN, RENDERER_KEY (same as the renderer's)
+                                              # optional: PLASMATRACK_BOT_TOKEN, PLASMATRACK_WEBHOOK_SECRET
     npx wrangler d1 migrations apply plasmatrack-bot --local
     npx wrangler dev
 

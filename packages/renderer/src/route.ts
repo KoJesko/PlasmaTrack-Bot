@@ -1,8 +1,8 @@
 import mbgl from '@maplibre/maplibre-gl-native';
-import type { Logger, ParsedRouteRenderRequest, ScaleClass } from '@plasmatrack/core';
+import type { Logger, ParsedRouteRenderRequest, RouteExtra, ScaleClass } from '@plasmatrack/core';
 import sharp from 'sharp';
 import { fitView, type LonLat, type View } from './geo.ts';
-import { overlaySvg } from './overlay.ts';
+import { legendExtent, overlaySvg, type OverlayOptions } from './overlay.ts';
 import { buildStyle, type Game } from './style.ts';
 import { svgToPng } from './svg.ts';
 import type { TileSource } from './tiles.ts';
@@ -38,7 +38,17 @@ export class RouteRenderer {
   async render(req: ParsedRouteRenderRequest): Promise<RenderedRoute> {
     const tiles = this.options.tiles[req.game];
     const points: LonLat[] = req.route.features.flatMap((f) => f.geometry.coordinates.map((c) => [c[0]!, c[1]!] as const));
-    const view = fitView(points, req.width, req.height, PADDING, { min: 0, max: MAX_ZOOM });
+    const { classes, extras } = legendEntries(req);
+    const overlayOptions: OverlayOptions = {
+      width: req.width,
+      height: req.height,
+      game: req.game,
+      classes,
+      extras,
+      ...(req.legend ? { legend: req.legend } : {}),
+      ...(req.title ? { title: req.title } : {}),
+    };
+    const view = fitClearOfLegend(points, req.width, req.height, legendExtent(overlayOptions));
 
     const style = buildStyle({
       game: req.game,
@@ -48,17 +58,7 @@ export class RouteRenderer {
     });
 
     const raw = await this.renderMap(style, view, tiles);
-    const classes = new Set<ScaleClass>(req.route.features.map((f) => f.properties.scale_class));
-    const overlay = svgToPng(
-      overlaySvg({
-        width: req.width,
-        height: req.height,
-        game: req.game,
-        classes,
-        ...(req.legend ? { legend: req.legend } : {}),
-        ...(req.title ? { title: req.title } : {}),
-      }),
-    );
+    const overlay = svgToPng(overlaySvg(overlayOptions));
     const png = await sharp(raw, { raw: { width: req.width, height: req.height, channels: 4 } })
       .composite([{ input: Buffer.from(overlay) }])
       .png({ compressionLevel: 9 })
@@ -100,4 +100,38 @@ export class RouteRenderer {
       }
     });
   }
+}
+
+/** What the legend lists: only what is actually drawn. */
+export function legendEntries(req: ParsedRouteRenderRequest): { classes: Set<ScaleClass>; extras: Set<RouteExtra> } {
+  const classes = new Set<ScaleClass>();
+  const extras = new Set<RouteExtra>();
+  for (const { properties: p } of req.route.features) {
+    if (p.status === 'reverted') {
+      extras.add('reverted');
+      continue;
+    }
+    if (p.segment === 'driving') {
+      classes.add(p.scale_class);
+      if (!p.counted) extras.add('uncounted');
+    } else if (p.segment === 'ferry' || p.segment === 'train') extras.add('ferry_train');
+    else extras.add(p.segment);
+  }
+  return { classes, extras };
+}
+
+/**
+ * Fits the route beside or below the legend (top-left), whichever leaves it
+ * bigger, so the legend never hides part of the route.
+ */
+export function fitClearOfLegend(
+  points: LonLat[],
+  width: number,
+  height: number,
+  legend: { right: number; bottom: number },
+): View {
+  const zoom = { min: 0, max: MAX_ZOOM };
+  const below = fitView(points, width, height, { top: legend.bottom + 12, right: PADDING, bottom: PADDING, left: PADDING }, zoom);
+  const beside = fitView(points, width, height, { top: PADDING, right: PADDING, bottom: PADDING, left: legend.right + 12 }, zoom);
+  return below.zoom >= beside.zoom ? below : beside;
 }

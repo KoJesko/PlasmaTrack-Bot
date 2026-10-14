@@ -11,6 +11,7 @@ import type { OutgoingFile, OutgoingMessage } from '../discord/rest.ts';
 import type { Logger } from '../log.ts';
 import type { ImageRenderer } from '../render/client.ts';
 import type { Clock, NoticeKind, NoticeStore } from '../ports.ts';
+import type { TruckersMpLookup } from '../truckersmp/client.ts';
 import type { WebhookEnvelope } from '../webhooks/events.ts';
 
 export type Access = 'everyone' | 'moderator';
@@ -26,7 +27,9 @@ export type HandlerResult =
   | { kind: 'modal'; modal: APIModalInteractionResponseCallbackData }
   | { kind: 'defer'; ephemeral: boolean; task: TaskRequest }
   /** For buttons: acknowledge without a new message, then edit the message from the task. */
-  | { kind: 'defer-update'; task: TaskRequest };
+  | { kind: 'defer-update'; task: TaskRequest }
+  /** For buttons: replace the message the button is on, immediately (no I/O). */
+  | { kind: 'update'; message: OutgoingMessage };
 
 /** Must survive a JSON round trip (it travels through the queue). Never put player tokens here. */
 export interface TaskRequest {
@@ -113,6 +116,8 @@ export interface TaskDeps {
   renderer: ImageRenderer;
   /** The PlasmaTrack server, or null until it is configured (PLASMATRACK_API_URL). */
   api: PlasmaTrackApi | null;
+  /** Confirms reported TruckersMP accounts against TruckersMP's public API. */
+  truckersmp: TruckersMpLookup;
 }
 
 export interface TaskOutput {

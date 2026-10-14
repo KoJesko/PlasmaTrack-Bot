@@ -50,3 +50,7 @@ DISCORD_GUILD_ID = "<the PlasmaTrack server id>"
 MODERATOR_ROLE_IDS = "<role id>,<role id>"
 NOTICE_TTL_DAYS = "30"
 RENDERER_URL = "https://<your renderer host>"
+# The PlasmaTrack server (origin only; the bot adds /api/v1). Leave it out until the server
+# exists: commands that need it then say it isn't connected. Set it together with the
+# PLASMATRACK_BOT_TOKEN secret.
+# PLASMATRACK_API_URL = "https://<server host>"

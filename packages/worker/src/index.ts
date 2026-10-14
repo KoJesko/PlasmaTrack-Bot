@@ -12,6 +12,7 @@ import {
   secretValues,
   systemClock,
   tasks,
+  TruckersMpClient,
   verifyDiscordSignature,
   WEBHOOK_EVENT_ID_HEADER,
   WEBHOOK_MAX_BYTES,
@@ -60,6 +61,7 @@ function consumerDeps(env: Env, rt: Runtime): ConsumerDeps {
       rt.config.PLASMATRACK_API_URL && rt.config.PLASMATRACK_BOT_TOKEN
         ? new PlasmaTrackApi({ baseUrl: rt.config.PLASMATRACK_API_URL, token: rt.config.PLASMATRACK_BOT_TOKEN })
         : null,
+    truckersmp: new TruckersMpClient({ cache: new R2BlobCache(env.RENDER_CACHE) }),
     dedupe: new D1DedupeStore(env.DB),
     jobVersions: new D1JobVersionStore(env.DB),
     queue: new CloudflareWorkQueue(env.WORK_QUEUE),

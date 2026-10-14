@@ -1,4 +1,4 @@
-import type { RouteGeoJson, ScaleClass } from '@plasmatrack/core';
+import type { RouteExtra, RouteGeoJson, ScaleClass } from '@plasmatrack/core';
 
 // Our own MapLibre style for basemap tiles produced by truckermudgeon/maps.
 // It only relies on documented facts about those tiles: one source layer named
@@ -20,6 +20,20 @@ export const SCALE_COLORS: Record<ScaleClass, string> = {
 export const UNKNOWN_DASH: [number, number] = [2, 1.5];
 export const ROUTE_WIDTH = 5;
 export const ROUTE_CASING_WIDTH = 9;
+
+/**
+ * Everything that isn't counted driving (server PUBLIC_API §4). Thinner than
+ * the route, so the scored stretches stay the main thing on the map.
+ */
+export const EXTRA_STYLES: Record<RouteExtra, { color: string; width: number; dash?: [number, number]; opacity?: number }> = {
+  /** Driving that earned no distance (e.g. the empty drive to the pickup): the scale colour, faded. */
+  uncounted: { color: '#8a8a8a', width: 3, opacity: 0.45 },
+  ferry_train: { color: '#2f6f9f', width: 2.5, dash: [2, 1.5] },
+  teleport: { color: '#8e44ad', width: 2.5, dash: [1, 2] },
+  gap: { color: '#555555', width: 2.5, dash: [1, 2] },
+  /** Admin routes: stretches undone by a save load, drawn underneath everything else. */
+  reverted: { color: '#b0a69a', width: 3, dash: [1, 1.5] },
+};
 
 export const COLORS = {
   background: '#f2efe9',
@@ -82,6 +96,36 @@ export function buildStyle(opts: StyleOptions): object {
       ]
     : [];
 
+  const scaleColor = [
+    'match',
+    ['get', 'scale_class'],
+    'city', SCALE_COLORS.city,
+    'road', SCALE_COLORS.road,
+    'one_to_one', SCALE_COLORS.one_to_one,
+    'nonstandard', SCALE_COLORS.nonstandard,
+    SCALE_COLORS.unknown,
+  ];
+  const kept = ['!=', ['get', 'status'], 'reverted'];
+  const driving = ['==', ['get', 'segment'], 'driving'];
+  const counted = ['==', ['get', 'counted'], true];
+  const routeLine = (id: string, filter: unknown[], paint: object, layout: object = { 'line-join': 'round' }) => ({
+    id,
+    type: 'line',
+    source: 'route',
+    filter,
+    layout,
+    paint,
+  });
+  const extra = (id: string, kind: RouteExtra, filter: unknown[]) => {
+    const s = EXTRA_STYLES[kind];
+    return routeLine(id, filter, {
+      'line-color': s.color,
+      'line-width': s.width,
+      ...(s.dash ? { 'line-dasharray': s.dash } : {}),
+      ...(s.opacity ? { 'line-opacity': s.opacity } : {}),
+    });
+  };
+
   return {
     version: 8,
     sources: {
@@ -100,40 +144,33 @@ export function buildStyle(opts: StyleOptions): object {
     layers: [
       { id: 'background', type: 'background', paint: { 'background-color': COLORS.background } },
       ...basemapLayers,
-      {
-        id: 'route-casing',
-        type: 'line',
-        source: 'route',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': COLORS.routeCasing, 'line-width': ROUTE_CASING_WIDTH },
-      },
-      {
-        id: 'route',
-        type: 'line',
-        source: 'route',
-        filter: ['!=', ['get', 'scale_class'], 'unknown'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': [
-            'match',
-            ['get', 'scale_class'],
-            'city', SCALE_COLORS.city,
-            'road', SCALE_COLORS.road,
-            'one_to_one', SCALE_COLORS.one_to_one,
-            'nonstandard', SCALE_COLORS.nonstandard,
-            SCALE_COLORS.unknown,
-          ],
-          'line-width': ROUTE_WIDTH,
-        },
-      },
-      {
-        id: 'route-unknown',
-        type: 'line',
-        source: 'route',
-        filter: ['==', ['get', 'scale_class'], 'unknown'],
-        layout: { 'line-join': 'round' },
-        paint: { 'line-color': SCALE_COLORS.unknown, 'line-width': ROUTE_WIDTH, 'line-dasharray': UNKNOWN_DASH },
-      },
+      extra('route-reverted', 'reverted', ['==', ['get', 'status'], 'reverted']),
+      routeLine(
+        'route-casing',
+        ['all', kept, driving, counted],
+        { 'line-color': COLORS.routeCasing, 'line-width': ROUTE_CASING_WIDTH },
+        { 'line-cap': 'round', 'line-join': 'round' },
+      ),
+      routeLine(
+        'route-uncounted',
+        ['all', kept, driving, ['!', counted]],
+        { 'line-color': scaleColor, 'line-width': EXTRA_STYLES.uncounted.width, 'line-opacity': EXTRA_STYLES.uncounted.opacity! },
+        { 'line-cap': 'round', 'line-join': 'round' },
+      ),
+      routeLine(
+        'route',
+        ['all', kept, driving, counted, ['!=', ['get', 'scale_class'], 'unknown']],
+        { 'line-color': scaleColor, 'line-width': ROUTE_WIDTH },
+        { 'line-cap': 'round', 'line-join': 'round' },
+      ),
+      routeLine('route-unknown', ['all', kept, driving, counted, ['==', ['get', 'scale_class'], 'unknown']], {
+        'line-color': SCALE_COLORS.unknown,
+        'line-width': ROUTE_WIDTH,
+        'line-dasharray': UNKNOWN_DASH,
+      }),
+      extra('route-ferry-train', 'ferry_train', ['all', kept, ['in', ['get', 'segment'], ['literal', ['ferry', 'train']]]]),
+      extra('route-teleport', 'teleport', ['all', kept, ['==', ['get', 'segment'], 'teleport']]),
+      extra('route-gap', 'gap', ['all', kept, ['==', ['get', 'segment'], 'gap']]),
     ],
   };
 }

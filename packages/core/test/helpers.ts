@@ -32,10 +32,10 @@ export function captureLogger() {
   return { logger, lines };
 }
 
-type Base = { guild?: boolean; roles?: string[]; user?: string };
+type Base = { guild?: boolean; roles?: string[]; user?: string; options?: unknown[]; globalName?: string };
 
 function base(opts: Base) {
-  const user = { id: opts.user ?? USER_A, username: 'driver', discriminator: '0', global_name: null, avatar: null };
+  const user = { id: opts.user ?? USER_A, username: 'driver', discriminator: '0', global_name: opts.globalName ?? null, avatar: null };
   const common = {
     id: '600000000000000006',
     application_id: APP_ID,
@@ -70,7 +70,7 @@ export function commandInteraction(name: string, opts: Base = {}): APIInteractio
   return {
     ...base(opts),
     type: InteractionType.ApplicationCommand,
-    data: { id: '700000000000000007', name, type: ApplicationCommandType.ChatInput, options: [] },
+    data: { id: '700000000000000007', name, type: ApplicationCommandType.ChatInput, options: opts.options ?? [] },
   } as unknown as APIInteraction;
 }
 
@@ -156,6 +156,7 @@ export function taskDeps(clock = new FakeClock()) {
     logger,
     renderer,
     api: null,
+    truckersmp: { player: async () => null },
     dedupe,
     jobVersions,
     queue,

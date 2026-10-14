@@ -1,5 +1,9 @@
 # What the Discord bot needs from the server contract
 
+> **Answered.** The server published its contract v1 (copied into [contract/](contract/)). It
+> covers everything below; where it chose differently, the contract wins. The owner confirmed
+> all of §8's defaults on 2026-10-14. This file is kept as the record of what was asked.
+
 **Audience:** whoever writes `docs/PUBLIC_API.md`, `docs/ADMIN_API.md` and `docs/WEBHOOKS.md` in the PlasmaTrack server repo.
 **Status:** requirements only. The bot does not propose paths or field names. It builds strictly against whatever the contract defines. Each item below is something the contract must answer; "(Q)" marks an open decision.
 

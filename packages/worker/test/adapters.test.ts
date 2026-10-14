@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { CloudflareWorkQueue, D1DedupeStore, D1NoticeStore, R2BlobCache } from '../src/adapters.ts';
+import { CloudflareWorkQueue, D1DedupeStore, D1JobVersionStore, D1NoticeStore, R2BlobCache } from '../src/adapters.ts';
 import { USER_A, USER_B } from './helpers.ts';
 
 class Clock {
@@ -21,6 +21,27 @@ describe('D1DedupeStore', () => {
     expect(await store.claim('evt_1', 60)).toBe(true);
     clock.t += 120_000;
     expect(await store.purgeExpired()).toBe(2);
+  });
+
+  it('releases a claim so a failed attempt can run again', async () => {
+    const store = new D1DedupeStore(env.DB, new Clock());
+    expect(await store.claim('evt_r', 60)).toBe(true);
+    await store.release('evt_r');
+    expect(await store.claim('evt_r', 60)).toBe(true);
+  });
+});
+
+describe('D1JobVersionStore', () => {
+  it('only moves forward, then forgets old jobs', async () => {
+    const clock = new Clock();
+    const store = new D1JobVersionStore(env.DB, clock);
+    expect(await store.advance('7K2M9QXA', 3)).toBe(true);
+    expect(await store.advance('7K2M9QXA', 3)).toBe(false);
+    expect(await store.advance('7K2M9QXA', 2)).toBe(false);
+    expect(await store.advance('7K2M9QXA', 4)).toBe(true);
+    clock.t += 1000;
+    expect(await store.purgeOlderThan(clock.t)).toBe(1);
+    expect(await store.advance('7K2M9QXA', 1)).toBe(true);
   });
 });
 
@@ -82,5 +103,14 @@ describe('CloudflareWorkQueue', () => {
     await q.send('a');
     await q.send('b', { delaySeconds: 30 });
     expect(calls).toEqual([['a', undefined], ['b', { delaySeconds: 30 }]]);
+  });
+
+  it('sends batches in chunks of 100, the Queues limit', async () => {
+    const sizes: number[] = [];
+    const q = new CloudflareWorkQueue({
+      sendBatch: async (msgs: unknown[]) => void sizes.push(msgs.length),
+    } as unknown as Queue<number>);
+    await q.sendBatch(Array.from({ length: 250 }, (_, i) => i));
+    expect(sizes).toEqual([100, 100, 50]);
   });
 });

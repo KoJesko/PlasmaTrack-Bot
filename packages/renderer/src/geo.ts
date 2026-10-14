@@ -26,8 +26,17 @@ export interface View {
   height: number;
 }
 
+/** Pixels kept free on each side of the image. */
+export interface Insets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
 /**
- * The view that fits all points with `padding` pixels on each side. Routes on
+ * The view that fits all points inside the image minus `padding` (one value
+ * for every side, or per side, e.g. to keep the route clear of the legend). Routes on
  * modded maps may sit far from the vanilla map; they are fitted all the same,
  * and the basemap simply doesn't line up (that mismatch is the evidence).
  */
@@ -35,9 +44,10 @@ export function fitView(
   points: Iterable<LonLat>,
   width: number,
   height: number,
-  padding: number,
+  padding: number | Insets,
   zoomRange: { min: number; max: number },
 ): View {
+  const pad = typeof padding === 'number' ? { top: padding, right: padding, bottom: padding, left: padding } : padding;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -53,12 +63,17 @@ export function fitView(
 
   const spanX = Math.max(maxX - minX, 1e-9);
   const spanY = Math.max(maxY - minY, 1e-9);
-  const usableW = Math.max(width - 2 * padding, 1);
-  const usableH = Math.max(height - 2 * padding, 1);
-  const zoom = Math.log2(Math.min(usableW / (spanX * TILE_SIZE), usableH / (spanY * TILE_SIZE)));
+  const usableW = Math.max(width - pad.left - pad.right, 1);
+  const usableH = Math.max(height - pad.top - pad.bottom, 1);
+  const fitted = Math.log2(Math.min(usableW / (spanX * TILE_SIZE), usableH / (spanY * TILE_SIZE)));
+  const zoom = Math.max(zoomRange.min, Math.min(zoomRange.max, fitted));
+  // Put the route's centre in the middle of the usable area, not of the image.
+  const scale = TILE_SIZE * 2 ** zoom;
+  const shiftX = (pad.left - pad.right) / 2 / scale;
+  const shiftY = (pad.top - pad.bottom) / 2 / scale;
   return {
-    center: unproject([(minX + maxX) / 2, (minY + maxY) / 2]),
-    zoom: Math.max(zoomRange.min, Math.min(zoomRange.max, zoom)),
+    center: unproject([(minX + maxX) / 2 - shiftX, (minY + maxY) / 2 - shiftY]),
+    zoom,
     width,
     height,
   };

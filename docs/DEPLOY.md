@@ -55,6 +55,37 @@ exists. Then:
     npx wrangler secret put RENDERER_KEY
     npx wrangler deploy
 
+### Connecting the PlasmaTrack server
+
+Do this once the server is deployed. Until then, leave these out; the bot works without them.
+
+1. **API:** set `PLASMATRACK_API_URL` in `wrangler.toml` (the server's origin, e.g.
+   `https://plasmatrack-server.<account>.workers.dev`), then:
+
+       npx wrangler secret put PLASMATRACK_BOT_TOKEN
+
+   The server's separate read-only token isn't used.
+2. **Webhooks:**
+   1. Generate a secret:
+
+          node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+
+   2. Store it on the bot:
+
+          npx wrangler secret put PLASMATRACK_WEBHOOK_SECRET
+
+   3. In the server's settings, set the same secret and the webhook URL
+      `https://<this worker>/webhooks/plasmatrack`.
+   4. **To rotate:** put both secrets on each side, comma-separated on the bot. Once the
+      server signs with the new one, remove the old one from both.
+3. **Migrations:** apply them (`0002` adds the table used to order webhook events):
+
+       npx wrangler d1 migrations apply plasmatrack-bot --remote
+
+4. **Admins:** every moderator who uses moderator commands must also be an admin on the
+   server, which makes the final call (server API_CONVENTIONS §2). Add the first admin on the
+   server host with `plasmatrack-server admin add <discord id>`.
+
 The Worker validates its configuration on every request. If anything is missing or still a
 placeholder, it answers 500 and logs the names of the bad keys (never their values). Watch
 the logs with `npx wrangler tail`.

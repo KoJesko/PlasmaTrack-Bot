@@ -163,7 +163,12 @@ export const jobSummarySchema = obj({
 });
 export type JobSummary = z.infer<typeof jobSummarySchema>;
 
-const scaleDistance = obj({ world_km: z.number(), game_km: z.number() });
+const scaleDistance = obj({
+  world_km: z.number(),
+  game_km: z.number(),
+  world_mi: z.number().optional(),
+  game_mi: z.number().optional(),
+});
 
 export const jobBonusSchema = obj({
   bonus_id: z.string(),

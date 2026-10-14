@@ -74,6 +74,8 @@ export class MockPlasmaTrackServer {
   readonly releases: Json[] = [];
   readonly revocations = new Map<string, Json>();
   readonly operations = new Map<string, Json>();
+  /** TruckersMP account IDs the tracker reported, per Discord ID. */
+  readonly truckersmpAccounts = new Map<string, number[]>();
   private readonly idempotency = new Map<string, Stored>();
   private nextId = 1;
   private failures: { status: number; code: string; headers?: Record<string, string> }[] = [];
@@ -556,7 +558,13 @@ export class MockPlasmaTrackServer {
       ...this.ref(discordId),
       singleplayer_division: p.singleplayer_division,
       disabled: p.disabled,
-      truckersmp_accounts: [],
+      truckersmp_accounts: (this.truckersmpAccounts.get(discordId) ?? []).map((id) => ({
+        account_id: id,
+        profile_url: `https://truckersmp.com/user/${id}`,
+        first_seen_at: NOW,
+        last_seen_at: NOW,
+        job_count: 1,
+      })),
       stats: { ets2: this.stats(discordId, 'ets2'), ats: this.stats(discordId, 'ats') },
     };
   }
@@ -599,14 +607,14 @@ export class MockPlasmaTrackServer {
   }
 
   private detail(j: Job): Json {
-    const zero = { world_km: 0, game_km: 0 };
+    const zero = { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 };
     return {
       ...this.summary(j),
       player: this.ref(j.owner),
       planned_distance_km: 62,
       speed_penalty_applied: false,
       bonus: null,
-      distance_by_scale_class: { city: { world_km: 2.81, game_km: 8.43 }, road: { world_km: 8.57, game_km: 117.27 }, one_to_one: zero, nonstandard: zero, unknown: zero },
+      distance_by_scale_class: { city: { world_km: 2.81, world_mi: 1.75, game_km: 8.43, game_mi: 5.24 }, road: { world_km: 8.57, world_mi: 5.33, game_km: 117.27, game_mi: 72.87 }, one_to_one: zero, nonstandard: zero, unknown: zero },
       public_notes: j.outcome === 'pending_review' ? [{ code: 'under_review', text: 'A moderator will check this job.' }] : [],
     };
   }

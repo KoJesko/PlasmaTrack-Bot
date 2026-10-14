@@ -2,8 +2,8 @@ import { createLogger, MAP_CREDIT_LINE, routeRenderRequestSchema, type RouteRend
 import { beforeAll, describe, expect, it } from 'vitest';
 import { toPixel, type LonLat } from '../src/geo.ts';
 import { overlaySvg } from '../src/overlay.ts';
-import { RouteRenderer } from '../src/route.ts';
-import { COLORS, SCALE_COLORS } from '../src/style.ts';
+import { legendEntries, RouteRenderer } from '../src/route.ts';
+import { COLORS, EXTRA_STYLES, SCALE_COLORS } from '../src/style.ts';
 import { PMTilesFileSource, StrippingTileSource } from '../src/tiles.ts';
 import { PREFABS, writeBasemapFixture } from './fixtures/basemap.ts';
 import { decodePng, hex, near, type Image } from './helpers.ts';
@@ -107,6 +107,66 @@ describe('route image', () => {
     const bare = new RouteRenderer({ tiles: {}, stripFlags: ['hidden', 'secret'], logger });
     const { png } = await bare.render(routeRenderRequestSchema.parse({ ...ROUTE, game: 'ets2' }));
     expect((await decodePng(png)).width).toBe(800);
+  });
+
+  it('draws crossings, teleports, gaps, uncounted and reverted stretches apart from counted driving', async () => {
+    const seg = (props: Record<string, unknown>, from: LonLat, to: LonLat) => ({
+      ...line('road', from, to),
+      properties: { scale_class: 'road', ...props },
+    });
+    const req = routeRenderRequestSchema.parse({
+      game: 'ats',
+      width: 800,
+      height: 600,
+      route: {
+        type: 'FeatureCollection',
+        features: [
+          seg({ counted: false }, [-99, 39], [-97, 39]),
+          seg({}, [-96, 39], [-94, 39]),
+          seg({ segment: 'ferry', scale_class: 'unknown' }, [-93, 39], [-91, 39]),
+          seg({ segment: 'teleport', scale_class: 'unknown' }, [-99, 38], [-97, 38]),
+          seg({ segment: 'something_new', scale_class: 'unknown' }, [-96, 38], [-94, 38]),
+          seg({ status: 'reverted' }, [-93, 38], [-91, 38]),
+          seg({}, [-99.5, 35.5], [-99.4, 35.5]),
+          seg({}, [-90.5, 41.8], [-90.4, 41.8]),
+        ],
+      },
+    });
+    const { png, view } = await renderer.render(req);
+    const img = await decodePng(png);
+    const at = (p: LonLat) => img.pixel(...toPixel(view, p));
+    // Thin lines can fall between pixel rows: look one row either side too.
+    const seen = (from: number, to: number, lat: number, color: string, tolerance = 12) => {
+      let n = 0;
+      for (let lon = from; lon <= to; lon += 0.02) {
+        const [x, y] = toPixel(view, [lon, lat]);
+        if ([-1, 0, 1].some((dy) => near(img.pixel(x, y + dy), hex(color), tolerance))) n++;
+      }
+      return n;
+    };
+
+    expect(at([-95, 39])).toSatisfy((c: number[]) => near(c, hex(SCALE_COLORS.road)));
+    // Uncounted: faded, so never the full road colour.
+    expect(seen(-98.8, -97.2, 39, SCALE_COLORS.road, 8)).toBe(0);
+    expect(at([-98, 39])).not.toSatisfy((c: number[]) => near(c, hex(COLORS.mapArea), 3));
+    expect(seen(-92.8, -91.2, 39, EXTRA_STYLES.ferry_train.color)).toBeGreaterThan(10);
+    expect(seen(-98.8, -97.2, 38, EXTRA_STYLES.teleport.color)).toBeGreaterThan(5);
+    // An unknown segment kind is drawn as missing data.
+    expect(seen(-95.8, -94.2, 38, EXTRA_STYLES.gap.color)).toBeGreaterThan(5);
+    expect(seen(-92.8, -91.2, 38, EXTRA_STYLES.reverted.color)).toBeGreaterThan(5);
+    expect(seen(-92.8, -91.2, 38, SCALE_COLORS.road, 8)).toBe(0);
+
+    expect(legendEntries(req)).toEqual({
+      classes: new Set(['road']),
+      extras: new Set(['uncounted', 'ferry_train', 'teleport', 'gap', 'reverted']),
+    });
+  });
+
+  it('legend shows the extra kinds only when present', () => {
+    const svg = overlaySvg({ width: 800, height: 600, game: 'ets2', classes: new Set(['road']), extras: new Set(['ferry_train']) });
+    expect(svg).toContain('Ferry or train');
+    expect(svg).not.toContain('Missing data');
+    expect(svg).not.toContain('save load');
   });
 
   it('lists only the classes present, with server-provided text, and escapes it', () => {

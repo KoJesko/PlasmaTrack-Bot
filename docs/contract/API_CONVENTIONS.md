@@ -151,8 +151,8 @@ returns `429`.
 
 ## 8. Decisions taken in this contract
 
-These answer the bot's open questions "(Q)". **They are defaults the project owner may still
-change.** Each change will be announced.
+These answer the bot's open questions "(Q)". **The project owner confirmed all of them on
+2026-10-14.** Any later change will be announced.
 
 | # | Question | Default chosen |
 |---|---|---|
@@ -175,3 +175,7 @@ change.** Each change will be announced.
   characters; webhook bodies are at most 256 KiB; moderator-issued tokens may be collected
   later (ADMIN_API §10); new review reasons `fast_average` and `fast_average_game`
   (ADMIN_API §2).
+- 2026-10-14: the project owner confirmed every decision in §8. The server runs on Cloudflare
+  Workers (PLAN decision 15); the contract is unchanged by that.
+- 2026-10-14: `distance_by_scale_class` (PUBLIC_API §3) carries `world_mi` and `game_mi` per
+  class as well (requested by the bot).

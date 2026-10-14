@@ -2,7 +2,7 @@ import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:
 import { describe, expect, it } from 'vitest';
 import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
-import { command, envWithRecordingQueue, INTERACTION_TOKEN, signedRequest, USER_A } from './helpers.ts';
+import { command, envWithRecordingQueue, INTERACTION_TOKEN, notificationEvent, signedRequest, signedWebhook, USER_A } from './helpers.ts';
 
 async function call(request: Request, testEnv: Env = env) {
   const ctx = createExecutionContext();
@@ -56,5 +56,37 @@ describe('HTTP entry point', () => {
     expect(res.status).toBe(500);
     const text = await res.text();
     expect(text).not.toContain(env.DISCORD_BOT_TOKEN);
+  });
+});
+
+describe('webhook endpoint', () => {
+  it('queues a correctly signed event and answers 202', async () => {
+    const { testEnv, sent } = envWithRecordingQueue();
+    const res = await call(await signedWebhook(notificationEvent('evt_http_1')), testEnv);
+    expect(res.status).toBe(202);
+    expect(sent).toEqual([expect.objectContaining({ type: 'webhook', chunk: 0, event: expect.objectContaining({ event_id: 'evt_http_1' }) })]);
+  });
+
+  it('rejects a bad signature and an oversize body without queueing', async () => {
+    const { testEnv, sent } = envWithRecordingQueue();
+    const forged = await signedWebhook(notificationEvent('evt_http_2'), 'some-other-secret-0123456789abcdefghijkl');
+    expect((await call(forged, testEnv)).status).toBe(401);
+    const big = new Request('https://bot.test/webhooks/plasmatrack', {
+      method: 'POST',
+      headers: { 'Content-Length': String(300 * 1024) },
+      body: 'x'.repeat(300 * 1024),
+    });
+    expect((await call(big, testEnv)).status).toBe(413);
+    expect(sent).toEqual([]);
+  });
+
+  it('answers 503 while no webhook secret is configured', async () => {
+    const { testEnv } = envWithRecordingQueue();
+    const res = await call(await signedWebhook(notificationEvent('evt_http_3')), { ...testEnv, PLASMATRACK_WEBHOOK_SECRET: undefined });
+    expect(res.status).toBe(503);
+  });
+
+  it('only accepts POST', async () => {
+    expect((await call(new Request('https://bot.test/webhooks/plasmatrack'))).status).toBe(404);
   });
 });

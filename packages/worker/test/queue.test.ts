@@ -3,7 +3,7 @@ import type { QueueMessage } from '@plasmatrack/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { D1NoticeStore } from '../src/adapters.ts';
 import worker from '../src/index.ts';
-import { INTERACTION_TOKEN, USER_A, USER_B } from './helpers.ts';
+import { INTERACTION_TOKEN, notificationEvent, USER_A, USER_B } from './helpers.ts';
 
 function taskMessage(name: string, userId = USER_A): QueueMessage {
   return {
@@ -59,5 +59,33 @@ describe('queue consumer', () => {
     expect(result.retryMessages.map((m: { msgId: string }) => m.msgId)).toEqual(['m0']);
     expect(retries[0]).toHaveBeenCalledWith({ delaySeconds: 3 });
     expect(result.explicitAcks).toEqual([]);
+  });
+});
+
+describe('queue consumer: webhooks', () => {
+  const webhook = (eventId: string, user = USER_A): QueueMessage => ({ type: 'webhook', event: notificationEvent(eventId, user), chunk: 0 });
+
+  it('DMs a player notification, once even if redelivered', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+      String(input).endsWith('/users/@me/channels') ? Response.json({ id: '900000000000000009' }) : Response.json({ id: 'msg' }),
+    );
+    const { result } = await runBatch([webhook('evt_q_1'), webhook('evt_q_1')]);
+    expect([...result.explicitAcks].sort()).toEqual(['m0', 'm1']);
+    const urls = fetchSpy.mock.calls.map((c) => String(c[0]));
+    expect(urls).toEqual(['https://discord.com/api/v10/users/@me/channels', 'https://discord.com/api/v10/channels/900000000000000009/messages']);
+    const init = fetchSpy.mock.calls[1]![1] as RequestInit;
+    expect(JSON.parse(init.body as string).embeds[0].title).toBe('Invalid delivery');
+  });
+
+  it('stores the notice in D1 when the player\u2019s DMs are closed', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+      String(input).endsWith('/users/@me/channels')
+        ? Response.json({ id: '900000000000000009' })
+        : Response.json({ message: 'Cannot send messages to this user', code: 50007 }, { status: 403 }),
+    );
+    const { result } = await runBatch([webhook('evt_q_2', USER_B)]);
+    expect(result.explicitAcks).toEqual(['m0']);
+    const notices = await new D1NoticeStore(env.DB).listUnread(USER_B, 10);
+    expect(notices.map((n) => n.kind)).toContain('invalid_delivery');
   });
 });

@@ -20,6 +20,7 @@ export default defineConfig({
             DISCORD_PUBLIC_KEY: publicKey,
             DISCORD_BOT_TOKEN: 'test-bot-token-not-a-real-secret-0001',
             RENDERER_KEY: 'test-renderer-key-not-a-real-secret-000000',
+            PLASMATRACK_WEBHOOK_SECRET: 'test-webhook-secret-not-a-real-secret-0000',
           },
         },
       };

@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import type { QueueMessage } from '@plasmatrack/core';
+import { signWebhook, type QueueMessage } from '@plasmatrack/core';
 import type { Env } from '../src/env.ts';
 
 export const USER_A = '400000000000000004';
@@ -20,6 +20,39 @@ export async function signedRequest(body: unknown, opts: { tamper?: boolean; pat
     headers: { 'X-Signature-Ed25519': hex, 'X-Signature-Timestamp': timestamp, 'Content-Type': 'application/json' },
     body: opts.tamper ? raw.replace('}', ',"x":1}') : raw,
   });
+}
+
+/** A webhook request signed like the PlasmaTrack server signs it (server WEBHOOKS §2). */
+export async function signedWebhook(event: { event_id: string; type: string }, secret = env.PLASMATRACK_WEBHOOK_SECRET) {
+  const raw = JSON.stringify(event);
+  const signature = await signWebhook([secret], new TextEncoder().encode(raw), Date.now() / 1000);
+  return new Request('https://bot.test/webhooks/plasmatrack', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-PlasmaTrack-Signature': signature,
+      'X-PlasmaTrack-Event': event.type,
+      'X-PlasmaTrack-Event-Id': event.event_id,
+    },
+    body: raw,
+  });
+}
+
+export function notificationEvent(eventId: string, discordUserId = USER_A) {
+  return {
+    event_id: eventId,
+    type: 'player.notification',
+    occurred_at: '2026-10-14T09:20:11.204Z',
+    payload_version: 1,
+    data: {
+      recipient: { user_id: 'usr_1', discord_user_id: discordUserId },
+      kind: 'invalid_delivery',
+      job_id: '7K2M9QXA',
+      game: 'ats',
+      title: 'Invalid delivery',
+      text: 'This job was over the speed limit for too long and scores 0 points.',
+    },
+  };
 }
 
 export function command(name: string, opts: { user?: string; roles?: string[]; dm?: boolean } = {}) {
@@ -44,7 +77,9 @@ export function envWithRecordingQueue(): { testEnv: Env; sent: QueueMessage[] } 
     send: async (m: QueueMessage) => {
       sent.push(m);
     },
-    sendBatch: async () => {},
+    sendBatch: async (items: { body: QueueMessage }[]) => {
+      for (const i of items) sent.push(i.body);
+    },
   } as unknown as Queue<QueueMessage>;
   return { testEnv: { ...env, WORK_QUEUE: queue }, sent };
 }
