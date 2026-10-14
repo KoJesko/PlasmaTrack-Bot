@@ -1,4 +1,4 @@
-import { MessageFlags } from 'discord-api-types/v10';
+import { MessageFlags } from '../discord/constants.ts';
 import type { CommandDefinition, TaskDefinition } from '../interactions/types.ts';
 import { NOTICES_TASK } from '../interactions/tasks.ts';
 

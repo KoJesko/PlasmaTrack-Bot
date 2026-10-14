@@ -9,7 +9,7 @@ coverage/
 .env.*
 !.env.example
 packages/worker/wrangler.toml
-packages/renderer/renderer.toml
+packages/renderer/renderer.env
 
 # Game-derived basemap tiles are never committed
 *.pmtiles
@@ -24,3 +24,4 @@ packages/renderer/out/
 .idea/
 .DS_Store
 Thumbs.db
+packages/worker/.dev.vars.example

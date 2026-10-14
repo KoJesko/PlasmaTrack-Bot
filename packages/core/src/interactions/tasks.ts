@@ -1,4 +1,4 @@
-import { MessageFlags } from 'discord-api-types/v10';
+import { MessageFlags } from '../discord/constants.ts';
 import { DiscordApiError } from '../discord/rest.ts';
 import {
   RetryableError,

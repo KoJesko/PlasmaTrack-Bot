@@ -1,6 +1,7 @@
 import {
   ConfigError,
   createLogger,
+  RendererClient,
   DiscordRest,
   handleInteraction,
   handlers,
@@ -16,7 +17,7 @@ import {
   type TaskDeps,
 } from '@plasmatrack/core';
 import type { APIInteraction } from 'discord-api-types/v10';
-import { CloudflareWorkQueue, D1DedupeStore, D1NoticeStore } from './adapters.ts';
+import { CloudflareWorkQueue, D1DedupeStore, D1NoticeStore, R2BlobCache } from './adapters.ts';
 import type { Env } from './env.ts';
 
 interface Runtime {
@@ -41,6 +42,11 @@ function taskDeps(env: Env, rt: Runtime): TaskDeps {
     notices: new D1NoticeStore(env.DB),
     clock: systemClock,
     logger: rt.logger,
+    renderer: new RendererClient({
+      baseUrl: rt.config.RENDERER_URL,
+      key: rt.config.RENDERER_KEY,
+      cache: new R2BlobCache(env.RENDER_CACHE),
+    }),
   };
 }
 

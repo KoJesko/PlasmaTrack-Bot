@@ -19,9 +19,10 @@ async function runBatch(messages: QueueMessage[]) {
     'plasmatrack-work-test',
     messages.map((body, i) => ({ id: `m${i}`, timestamp: new Date(), attempts: 1, body })),
   );
+  const retries = batch.messages.map((m) => vi.spyOn(m, 'retry'));
   const ctx = createExecutionContext();
   await worker.queue(batch, env, ctx);
-  return getQueueResult(batch, ctx);
+  return { result: await getQueueResult(batch, ctx), retries };
 }
 
 afterEach(() => {
@@ -36,7 +37,7 @@ describe('queue consumer', () => {
     await store.add(USER_B, { id: 'n1', kind: 'invalid_delivery', text: 'B only', createdAt: now, expiresAt: now + 60_000 });
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ id: 'msg' }));
-    const result = await runBatch([taskMessage('notices.list')]);
+    const { result } = await runBatch([taskMessage('notices.list')]);
 
     expect(result.explicitAcks).toEqual(['m0']);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -54,8 +55,9 @@ describe('queue consumer', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       Response.json({ message: 'rate limited', retry_after: 2.5 }, { status: 429 }),
     );
-    const result = await runBatch([taskMessage('notices.list')]);
-    expect(result.retryMessages).toEqual([{ msgId: 'm0', delaySeconds: 3 }]);
+    const { result, retries } = await runBatch([taskMessage('notices.list')]);
+    expect(result.retryMessages.map((m: { msgId: string }) => m.msgId)).toEqual(['m0']);
+    expect(retries[0]).toHaveBeenCalledWith({ delaySeconds: 3 });
     expect(result.explicitAcks).toEqual([]);
   });
 });

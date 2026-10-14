@@ -136,6 +136,10 @@ export function taskDeps(clock = new FakeClock()) {
   const discord = new FakeDiscord();
   const notices = new MemoryNoticeStore(clock);
   const { logger, lines } = captureLogger();
-  const deps: TaskDeps = { discord, notices, clock, logger };
+  const renderer = {
+    renderRoute: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
+    renderChart: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
+  };
+  const deps: TaskDeps = { discord, notices, clock, logger, renderer };
   return { deps, discord, notices, clock, lines };
 }

@@ -8,6 +8,7 @@ import type {
 } from 'discord-api-types/v10';
 import type { OutgoingFile, OutgoingMessage } from '../discord/rest.ts';
 import type { Logger } from '../log.ts';
+import type { ImageRenderer } from '../render/client.ts';
 import type { Clock, NoticeStore } from '../ports.ts';
 
 export type Access = 'everyone' | 'moderator';
@@ -92,6 +93,7 @@ export interface TaskDeps {
   notices: NoticeStore;
   clock: Clock;
   logger: Logger;
+  renderer: ImageRenderer;
 }
 
 export interface TaskOutput {

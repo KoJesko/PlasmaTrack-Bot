@@ -1,9 +1,8 @@
-import {
-  ApplicationIntegrationType,
-  InteractionContextType,
-  type RESTPutAPIApplicationCommandsJSONBody,
-  type RESTPutAPIApplicationGuildCommandsJSONBody,
+import type {
+  RESTPutAPIApplicationCommandsJSONBody,
+  RESTPutAPIApplicationGuildCommandsJSONBody,
 } from 'discord-api-types/v10';
+import { ApplicationIntegrationType, InteractionContextType } from '../discord/constants.ts';
 import type { CommandDefinition } from '../interactions/types.ts';
 
 export interface CommandRegistration {

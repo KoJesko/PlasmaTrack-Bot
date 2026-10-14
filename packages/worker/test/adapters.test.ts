@@ -57,7 +57,10 @@ describe('D1NoticeStore', () => {
     await store.add(USER_A, notice('old', clock.t));
     clock.t += 3_600_001;
     expect(await store.countUnread(USER_A)).toBe(0);
-    expect(await store.purgeExpired()).toBe(1);
+    // Storage is shared across this file's tests, so other expired rows may go too.
+    expect(await store.purgeExpired()).toBeGreaterThanOrEqual(1);
+    clock.t -= 3_600_001;
+    expect(await store.countUnread(USER_A)).toBe(0);
   });
 });
 

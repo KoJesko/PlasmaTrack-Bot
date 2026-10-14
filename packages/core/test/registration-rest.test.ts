@@ -104,6 +104,8 @@ describe('portability', () => {
       const src = readFileSync(f, 'utf8');
       expect(src, f).not.toMatch(/from ['"](cloudflare:|node:|@cloudflare\/)/);
       expect(src, f).not.toMatch(/\b(D1Database|R2Bucket|KVNamespace|ExecutionContext)\b/);
+      // Types only: discord-api-types' runtime enums are CommonJS and broke under workerd.
+      expect(src, f).not.toMatch(/^import (?!type )[^;]*from 'discord-api-types/m);
     }
   });
 });

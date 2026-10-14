@@ -9,7 +9,8 @@ export const GUILD_ID = '200000000000000002';
 export const INTERACTION_TOKEN = 'aW50ZXJhY3Rpb246dGVzdC10b2tlbg';
 
 export async function signedRequest(body: unknown, opts: { tamper?: boolean; path?: string } = {}): Promise<Request> {
-  const key = await crypto.subtle.importKey('jwk', JSON.parse(env.TEST_SIGNING_JWK), { name: 'Ed25519' }, false, ['sign']);
+  const pkcs8 = Uint8Array.from(atob(env.TEST_SIGNING_PKCS8), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']);
   const raw = JSON.stringify(body);
   const timestamp = String(Math.floor(Date.now() / 1000));
   const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', key, new TextEncoder().encode(timestamp + raw)));

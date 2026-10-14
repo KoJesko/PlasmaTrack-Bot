@@ -1,12 +1,14 @@
+import type {
+  APIChatInputApplicationCommandInteraction,
+  APIInteraction,
+  APIInteractionResponse,
+} from 'discord-api-types/v10';
 import {
+  ApplicationCommandType,
   InteractionResponseType,
   InteractionType,
   MessageFlags,
-  type APIChatInputApplicationCommandInteraction,
-  type APIInteraction,
-  type APIInteractionResponse,
-  ApplicationCommandType,
-} from 'discord-api-types/v10';
+} from '../discord/constants.ts';
 import type { Logger } from '../log.ts';
 import type { Clock, WorkQueue } from '../ports.ts';
 import type { OutgoingMessage } from '../discord/rest.ts';
