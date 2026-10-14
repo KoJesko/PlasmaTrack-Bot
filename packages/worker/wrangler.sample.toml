@@ -8,7 +8,7 @@
 
 name = "plasmatrack-bot"
 main = "src/index.ts"
-compatibility_date = "2026-09-01"
+compatibility_date = "2026-08-15"
 
 # Serves POST /interactions (Discord) and GET /healthz.
 # Point the Discord application's "Interactions Endpoint URL" at

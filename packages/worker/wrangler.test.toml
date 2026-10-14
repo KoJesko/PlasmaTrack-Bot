@@ -1,7 +1,7 @@
 # Used only by the test suite (Miniflare). Not deployable: IDs are placeholders.
 name = "plasmatrack-bot-test"
 main = "src/index.ts"
-compatibility_date = "2026-09-01"
+compatibility_date = "2026-08-15"
 
 [[d1_databases]]
 binding = "DB"

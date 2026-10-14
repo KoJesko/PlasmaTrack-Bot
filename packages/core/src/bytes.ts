@@ -3,7 +3,7 @@
 const encoder = new TextEncoder();
 
 export function utf8(text: string): Uint8Array<ArrayBuffer> {
-  return encoder.encode(text);
+  return encoder.encode(text) as Uint8Array<ArrayBuffer>;
 }
 
 export function hexToBytes(hex: string): Uint8Array<ArrayBuffer> | null {

@@ -100,7 +100,7 @@ export default {
     return new Response('not found', { status: 404 });
   },
 
-  async queue(batch, env) {
+  async queue(batch, env, _ctx) {
     const rt = runtime(env);
     const deps = taskDeps(env, rt);
     // Messages are independent; run them side by side so one slow render
