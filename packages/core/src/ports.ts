@@ -32,6 +32,8 @@ export interface DedupeStore {
 export interface JobVersionStore {
   /** Records `version` and returns true if it is newer than any seen for the job; false otherwise. */
   advance(jobId: string, version: number): Promise<boolean>;
+  /** The highest version handled so far, or null. */
+  current(jobId: string): Promise<number | null>;
   /** Forgets jobs not updated since `before` (ms). Webhooks are retried for at most 72 h. */
   purgeOlderThan(before: number): Promise<number>;
 }
@@ -71,4 +73,43 @@ export interface NoticeStore {
   listUnread(discordUserId: string, backend: string, limit: number): Promise<Notice[]>;
   markRead(discordUserId: string, ids: string[]): Promise<void>;
   purgeExpired(): Promise<number>;
+}
+
+/**
+ * A moderator-issued token waiting for its player (ADMIN_API §10). Holds who
+ * issued it and why, never a token: the token is created when the player
+ * clicks, with the issuing moderator as the actor.
+ */
+export interface TokenGrant {
+  id: string;
+  backend: string;
+  discordUserId: string;
+  moderatorId: string;
+  reason: string;
+  createdAt: number;
+  expiresAt: number;
+  usedAt: number | null;
+}
+
+export interface TokenGrantStore {
+  create(grant: TokenGrant): Promise<void>;
+  get(id: string): Promise<TokenGrant | null>;
+  /** Unused, unexpired grants for a player in one backend, newest first. */
+  pendingFor(discordUserId: string, backend: string): Promise<TokenGrant[]>;
+  markUsed(id: string, at: number): Promise<void>;
+  purgeExpired(): Promise<number>;
+}
+
+/** Which review-channel message shows which job, per backend and channel. */
+export interface ReviewPost {
+  backend: string;
+  jobId: string;
+  channelId: string;
+  messageId: string;
+}
+
+export interface ReviewPostStore {
+  put(post: ReviewPost): Promise<void>;
+  /** Every post of that job in that backend (one per review channel). */
+  find(backend: string, jobId: string): Promise<ReviewPost[]>;
 }

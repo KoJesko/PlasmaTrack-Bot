@@ -1,6 +1,14 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { CloudflareWorkQueue, D1DedupeStore, D1JobVersionStore, D1NoticeStore, R2BlobCache } from '../src/adapters.ts';
+import {
+  CloudflareWorkQueue,
+  D1DedupeStore,
+  D1JobVersionStore,
+  D1NoticeStore,
+  D1ReviewPostStore,
+  D1TokenGrantStore,
+  R2BlobCache,
+} from '../src/adapters.ts';
 import { USER_A, USER_B } from './helpers.ts';
 
 class Clock {
@@ -118,5 +126,41 @@ describe('CloudflareWorkQueue', () => {
     } as unknown as Queue<number>);
     await q.sendBatch(Array.from({ length: 250 }, (_, i) => i));
     expect(sizes).toEqual([100, 100, 50]);
+  });
+});
+
+describe('D1TokenGrantStore', () => {
+  it('lists a player’s pending grants per backend, until used or expired', async () => {
+    const clock = new Clock();
+    const store = new D1TokenGrantStore(env.DB, clock);
+    const grant = (id: string, backend = 'production') => ({
+      id,
+      backend,
+      discordUserId: USER_A,
+      moderatorId: USER_B,
+      reason: 'Asked in #support',
+      createdAt: clock.t,
+      expiresAt: clock.t + 60_000,
+      usedAt: null,
+    });
+    await store.create(grant('g1'));
+    await store.create(grant('g2', 'test'));
+    expect((await store.pendingFor(USER_A, 'production')).map((g) => g.id)).toEqual(['g1']);
+    expect(await store.get('g1')).toMatchObject({ moderatorId: USER_B, reason: 'Asked in #support', usedAt: null });
+    await store.markUsed('g1', clock.t);
+    expect(await store.pendingFor(USER_A, 'production')).toEqual([]);
+    clock.t += 60_001;
+    expect(await store.pendingFor(USER_A, 'test')).toEqual([]);
+    expect(await store.purgeExpired()).toBe(2);
+  });
+});
+
+describe('D1ReviewPostStore', () => {
+  it('keeps one post per job and channel, per backend', async () => {
+    const store = new D1ReviewPostStore(env.DB);
+    await store.put({ backend: 'production', jobId: '7K2M9QXA', channelId: '1', messageId: 'm1' });
+    await store.put({ backend: 'production', jobId: '7K2M9QXA', channelId: '1', messageId: 'm2' });
+    await store.put({ backend: 'test', jobId: '7K2M9QXA', channelId: '2', messageId: 'm3' });
+    expect(await store.find('production', '7K2M9QXA')).toEqual([{ backend: 'production', jobId: '7K2M9QXA', channelId: '1', messageId: 'm2' }]);
   });
 });

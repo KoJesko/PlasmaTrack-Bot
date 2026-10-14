@@ -5,7 +5,14 @@ import {
   type APIInteraction,
 } from 'discord-api-types/v10';
 import { createLogger, type LogLevel } from '../src/log.ts';
-import { MemoryDedupeStore, MemoryJobVersionStore, MemoryNoticeStore, MemoryWorkQueue } from '../src/memory.ts';
+import {
+  MemoryDedupeStore,
+  MemoryJobVersionStore,
+  MemoryNoticeStore,
+  MemoryReviewPostStore,
+  MemoryTokenGrantStore,
+  MemoryWorkQueue,
+} from '../src/memory.ts';
 import type { Clock } from '../src/ports.ts';
 import type { PlasmaTrackApi } from '../src/api/client.ts';
 import type { GuildSettings } from '../src/config.ts';
@@ -40,12 +47,26 @@ export function captureLogger() {
   return { logger, lines };
 }
 
-type Base = { guild?: boolean; roles?: string[]; user?: string; options?: unknown[]; globalName?: string };
+type Base = {
+  guild?: boolean;
+  roles?: string[];
+  user?: string;
+  options?: unknown[];
+  globalName?: string;
+  /** Interaction ID (idempotency keys derive from it). */
+  id?: string;
+  /** Form fields, for modal submissions. */
+  fields?: Record<string, string>;
+  /** Picked values, for select menus. */
+  values?: string[];
+  /** resolved.attachments, for commands with file options. */
+  attachments?: Record<string, { url: string; size: number; filename: string }>;
+};
 
 function base(opts: Base) {
   const user = { id: opts.user ?? USER_A, username: 'driver', discriminator: '0', global_name: opts.globalName ?? null, avatar: null };
   const common = {
-    id: '600000000000000006',
+    id: opts.id ?? '600000000000000006',
     application_id: APP_ID,
     token: INTERACTION_TOKEN,
     version: 1,
@@ -79,7 +100,13 @@ export function commandInteraction(name: string, opts: Base = {}): APIInteractio
   return {
     ...base(opts),
     type: InteractionType.ApplicationCommand,
-    data: { id: '700000000000000007', name, type: ApplicationCommandType.ChatInput, options: opts.options ?? [] },
+    data: {
+      id: '700000000000000007',
+      name,
+      type: ApplicationCommandType.ChatInput,
+      options: opts.options ?? [],
+      ...(opts.attachments ? { resolved: { attachments: opts.attachments } } : {}),
+    },
   } as unknown as APIInteraction;
 }
 
@@ -88,7 +115,9 @@ export function buttonInteraction(customId: string, opts: Base = {}): APIInterac
     ...base(opts),
     type: InteractionType.MessageComponent,
     message: { id: '1' },
-    data: { custom_id: customId, component_type: ComponentType.Button },
+    data: opts.values
+      ? { custom_id: customId, component_type: 3, values: opts.values }
+      : { custom_id: customId, component_type: ComponentType.Button },
   } as unknown as APIInteraction;
 }
 
@@ -96,7 +125,10 @@ export function modalInteraction(customId: string, opts: Base = {}): APIInteract
   return {
     ...base(opts),
     type: InteractionType.ModalSubmit,
-    data: { custom_id: customId, components: [] },
+    data: {
+      custom_id: customId,
+      components: Object.entries(opts.fields ?? {}).map(([k, v]) => ({ type: 1, components: [{ type: 4, custom_id: k, value: v }] })),
+    },
   } as unknown as APIInteraction;
 }
 
@@ -114,7 +146,7 @@ export function routerDeps(overrides: Partial<RouterDeps> = {}) {
   return { deps, queue };
 }
 
-export type SentCall = { op: 'edit' | 'followup' | 'dm'; target: string; message: unknown; files: unknown[] };
+export type SentCall = { op: 'edit' | 'followup' | 'dm' | 'post' | 'edit-post'; target: string; message: unknown; files: unknown[] };
 
 export class FakeDiscord implements DiscordSender {
   calls: SentCall[] = [];
@@ -138,6 +170,21 @@ export class FakeDiscord implements DiscordSender {
   /** DMs to these users fail with the given error (e.g. DMs closed). */
   dmFailures = new Map<string, Error>();
 
+  private nextMessage = 1;
+  /** Channel message edits fail with this (e.g. a 404 for a deleted post). */
+  editPostFailure: Error | null = null;
+
+  async postChannelMessage(channelId: string, message: unknown) {
+    this.check();
+    this.calls.push({ op: 'post', target: channelId, message, files: [] });
+    return `msg${this.nextMessage++}`;
+  }
+  async editChannelMessage(channelId: string, messageId: string, message: unknown) {
+    this.check();
+    if (this.editPostFailure) throw this.editPostFailure;
+    this.calls.push({ op: 'edit-post', target: `${channelId}/${messageId}`, message, files: [] });
+  }
+
   async sendDirectMessage(userId: string, message: unknown) {
     this.check();
     const fail = this.dmFailures.get(userId);
@@ -157,6 +204,10 @@ export function taskDeps(clock = new FakeClock()) {
   const queue = new MemoryWorkQueue<QueueMessage>();
   const dedupe = new MemoryDedupeStore(clock);
   const jobVersions = new MemoryJobVersionStore(clock);
+  const grants = new MemoryTokenGrantStore(clock);
+  const reviewPosts = new MemoryReviewPostStore();
+  /** Review channels of the test backend; tests may push to it. */
+  const reviewChannels: string[] = [];
   /** The test guild's backend; tests set `backend.api` to connect it. */
   const backend: { name: string; api: PlasmaTrackApi | null } = { name: BACKEND, api: null };
   const deps: ConsumerDeps = {
@@ -165,12 +216,18 @@ export function taskDeps(clock = new FakeClock()) {
     clock,
     logger,
     renderer,
-    backends: { forGuild: (guildId) => (guildId && GUILDS[guildId] ? backend : null) },
+    backends: {
+      forGuild: (guildId) => (guildId && GUILDS[guildId] ? backend : null),
+      byName: (name) => (name === backend.name ? backend.api : null),
+    },
+    grants,
+    reviewPosts,
+    reviewChannels: (name) => (name === backend.name ? reviewChannels : []),
     truckersmp: { player: async () => null },
     dedupe,
     jobVersions,
     queue,
     noticeTtlDays: 30,
   };
-  return { deps, backend, discord, notices, clock, lines, queue, dedupe, jobVersions };
+  return { deps, backend, discord, notices, clock, lines, queue, dedupe, jobVersions, grants, reviewPosts, reviewChannels };
 }

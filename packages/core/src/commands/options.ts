@@ -13,15 +13,22 @@ import { ApplicationCommandOptionType } from '../discord/constants.ts';
 
 type Option = APIApplicationCommandInteractionDataOption;
 
+/** "sub" or "group sub" (e.g. "token issue"), or undefined for a command without subcommands. */
 export function subcommand(i: APIChatInputApplicationCommandInteraction): string | undefined {
   const first = i.data.options?.[0];
-  return first?.type === ApplicationCommandOptionType.Subcommand ? first.name : undefined;
+  if (first?.type === ApplicationCommandOptionType.Subcommand) return first.name;
+  if (first?.type === ApplicationCommandOptionType.SubcommandGroup) {
+    const sub = first.options?.[0];
+    return sub ? `${first.name} ${sub.name}` : first.name;
+  }
+  return undefined;
 }
 
 function leafOptions(i: APIChatInputApplicationCommandInteraction): Option[] {
   const opts = i.data.options ?? [];
   const first = opts[0];
   if (first?.type === ApplicationCommandOptionType.Subcommand) return (first.options ?? []) as Option[];
+  if (first?.type === ApplicationCommandOptionType.SubcommandGroup) return (first.options?.[0]?.options ?? []) as Option[];
   return opts as Option[];
 }
 
@@ -38,6 +45,21 @@ export function stringOption(i: APIChatInputApplicationCommandInteraction, name:
 export function booleanOption(i: APIChatInputApplicationCommandInteraction, name: string): boolean | undefined {
   const v = raw(i, name);
   return typeof v === 'boolean' ? v : undefined;
+}
+
+export function numberOption(i: APIChatInputApplicationCommandInteraction, name: string): number | undefined {
+  const v = raw(i, name);
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+/** An uploaded file: Discord's CDN URL, size and name (from `resolved.attachments`). */
+export function attachmentOption(
+  i: APIChatInputApplicationCommandInteraction,
+  name: string,
+): { url: string; size: number; filename: string } | undefined {
+  const id = raw(i, name);
+  const a = typeof id === 'string' ? i.data.resolved?.attachments?.[id] : undefined;
+  return a ? { url: a.url, size: a.size, filename: a.filename } : undefined;
 }
 
 /** A user option's ID (Discord validates it and includes the user in `resolved`). */
@@ -74,4 +96,11 @@ export const GAME_OPTION: APIApplicationCommandStringOption = {
     { name: 'Euro Truck Simulator 2', value: 'ets2' },
     { name: 'American Truck Simulator', value: 'ats' },
   ],
+};
+
+/** Like GAME_OPTION, but optional: leaving it out means both games. */
+export const OPTIONAL_GAME_OPTION: APIApplicationCommandStringOption = {
+  ...GAME_OPTION,
+  description: 'Default: both games',
+  required: false,
 };

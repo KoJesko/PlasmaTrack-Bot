@@ -39,7 +39,7 @@ export function pointsText(outcome: Outcome, points: number | null, held: number
 }
 
 /** Discord renders `<t:…>` in each reader's own time zone. */
-export function discordTime(iso: string | null | undefined, style: 'f' | 'd' | 'D' | 'R' | 'F' = 'f'): string {
+export function discordTime(iso: string | null | undefined, style: 'f' | 'd' | 'D' | 'R' | 'F' | 'T' = 'f'): string {
   const ms = iso ? Date.parse(iso) : Number.NaN;
   return Number.isNaN(ms) ? '—' : `<t:${Math.floor(ms / 1000)}:${style}>`;
 }

@@ -64,7 +64,9 @@ Each Discord server the bot serves has a `[vars.GUILDS.<server id>]` table in `w
 - **member_roles:** who can use player commands. Every command except `/about` needs a role,
   and nothing works in DMs. With no member roles, only moderators can use it there.
 - **moderator_roles:** who can use moderator commands.
-- **review_channel:** where review-queue posts go (`""` for none).
+- **review_channel:** where review-queue posts go (`""` for none). The bot needs **View
+  Channel**, **Send Messages** and **Embed Links** there. Keep the channel visible to moderators
+  only: posts name the player and the review reasons.
 
 ### Connecting a PlasmaTrack server
 
@@ -93,7 +95,8 @@ e.g. `PRODUCTION` or `TEST`.
       `https://<this worker>/webhooks/plasmatrack` (the same URL for every backend).
    4. **To rotate:** put both secrets on each side, comma-separated on the bot. Once the
       server signs with the new one, remove the old one from both.
-3. **Migrations:** apply them (`0002` orders webhook events; `0003` keeps notices per backend):
+3. **Migrations:** apply them (`0002` orders webhook events, `0003` keeps notices per backend,
+   `0004` stores moderator-issued token grants and review posts):
 
        npx wrangler d1 migrations apply plasmatrack-bot --remote
 

@@ -39,19 +39,31 @@ export const ApplicationCommandOptionType = {
   Subcommand: 1 as D.ApplicationCommandOptionType.Subcommand,
   String: 3 as D.ApplicationCommandOptionType.String,
   Integer: 4 as D.ApplicationCommandOptionType.Integer,
+  Number: 10 as D.ApplicationCommandOptionType.Number,
   Boolean: 5 as D.ApplicationCommandOptionType.Boolean,
   User: 6 as D.ApplicationCommandOptionType.User,
+  Attachment: 11 as D.ApplicationCommandOptionType.Attachment,
+  SubcommandGroup: 2 as D.ApplicationCommandOptionType.SubcommandGroup,
 } as const;
 
 export const ComponentType = {
   ActionRow: 1 as D.ComponentType.ActionRow,
   Button: 2 as D.ComponentType.Button,
+  StringSelect: 3 as D.ComponentType.StringSelect,
+  TextInput: 4 as D.ComponentType.TextInput,
+} as const;
+
+export const TextInputStyle = {
+  Short: 1 as D.TextInputStyle.Short,
+  Paragraph: 2 as D.TextInputStyle.Paragraph,
 } as const;
 
 export const ButtonStyle = {
   Primary: 1 as D.ButtonStyle.Primary,
   Secondary: 2 as D.ButtonStyle.Secondary,
+  Success: 3 as D.ButtonStyle.Success,
   Danger: 4 as D.ButtonStyle.Danger,
+  Link: 5 as D.ButtonStyle.Link,
 } as const;
 
 export const MessageFlags = {

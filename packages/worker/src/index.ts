@@ -24,7 +24,15 @@ import {
   type QueueMessage,
 } from '@plasmatrack/core';
 import type { APIInteraction } from 'discord-api-types/v10';
-import { CloudflareWorkQueue, D1DedupeStore, D1JobVersionStore, D1NoticeStore, R2BlobCache } from './adapters.ts';
+import {
+  CloudflareWorkQueue,
+  D1DedupeStore,
+  D1JobVersionStore,
+  D1NoticeStore,
+  D1ReviewPostStore,
+  D1TokenGrantStore,
+  R2BlobCache,
+} from './adapters.ts';
 
 export const WEBHOOK_PATH = '/webhooks/plasmatrack';
 /** Job versions are kept a week: longer than the server's 72 h retry window. */
@@ -80,7 +88,14 @@ function consumerDeps(env: Env, rt: Runtime): ConsumerDeps {
         const guild = guildId ? rt.config.GUILDS[guildId] : undefined;
         return guild ? { name: guild.backend, api: backendApi(rt, guild.backend) } : null;
       },
+      byName: (name) => backendApi(rt, name),
     },
+    grants: new D1TokenGrantStore(env.DB),
+    reviewPosts: new D1ReviewPostStore(env.DB),
+    reviewChannels: (backend) =>
+      Object.values(rt.config.GUILDS)
+        .filter((g) => g.backend === backend && g.review_channel)
+        .map((g) => g.review_channel!),
     truckersmp: new TruckersMpClient({ cache: new R2BlobCache(env.RENDER_CACHE) }),
     dedupe: new D1DedupeStore(env.DB),
     jobVersions: new D1JobVersionStore(env.DB),
@@ -191,7 +206,8 @@ export default {
         new D1DedupeStore(env.DB).purgeExpired(),
         new D1NoticeStore(env.DB).purgeExpired(),
         new D1JobVersionStore(env.DB).purgeOlderThan(Date.now() - JOB_VERSION_RETENTION_MS),
-      ]).then(([dedupe, notices, jobVersions]) => rt.logger.info('purged expired rows', { dedupe, notices, jobVersions })),
+        new D1TokenGrantStore(env.DB).purgeExpired(),
+      ]).then(([dedupe, notices, jobVersions, grants]) => rt.logger.info('purged expired rows', { dedupe, notices, jobVersions, grants })),
     );
   },
 } satisfies ExportedHandler<Env, QueueMessage>;

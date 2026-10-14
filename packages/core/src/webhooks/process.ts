@@ -7,7 +7,7 @@ import {
   type QueueMessage,
 } from '../interactions/types.ts';
 import type { Logger } from '../log.ts';
-import type { Clock, DedupeStore, JobVersionStore, NoticeStore, WorkQueue } from '../ports.ts';
+import type { Clock, DedupeStore, JobVersionStore, NoticeStore, ReviewPostStore, WorkQueue } from '../ports.ts';
 import {
   jobDiscardedSchema,
   jobNeedsReviewSchema,
@@ -19,6 +19,8 @@ import {
   type WebhookEnvelope,
 } from './events.ts';
 import { notificationDm, revocationCancelledDm, revocationDm, type DmContent } from './messages.ts';
+import { needsReviewPost, operationPost, resolvedPost } from './review-posts.ts';
+import type { OutgoingMessage } from '../discord/rest.ts';
 
 // Queue-side handling of server webhooks. Delivery is at least once and
 // unordered (server WEBHOOKS §3): events are deduplicated on event_id, DMs on
@@ -38,6 +40,9 @@ export interface EventDeps {
   clock: Clock;
   logger: Logger;
   noticeTtlDays: number;
+  reviewPosts: ReviewPostStore;
+  /** Review channels of every Discord server that uses this backend. */
+  reviewChannels(backend: string): string[];
 }
 
 type WebhookMessage = Extract<QueueMessage, { type: 'webhook' }>;
@@ -78,34 +83,75 @@ async function handleEvent(backend: string, event: WebhookEnvelope, deps: EventD
       if (r) await fanOut(backend, `${r.revocation_id}:cancelled`, r.recipients, revocationCancelledDm(r), deps, { ...log, part: r.part });
       return;
     }
-    case 'job.needs_review':
-    case 'job.scored':
+    case 'job.needs_review': {
+      const job = parse(jobNeedsReviewSchema, event, deps.logger);
+      if (job) await updateReviewPosts(backend, job.job_id, job.job_version, needsReviewPost(job), true, deps, log);
+      return;
+    }
+    case 'job.scored': {
+      const job = parse(jobScoredSchema, event, deps.logger);
+      if (job) await updateReviewPosts(backend, job.job_id, job.job_version, resolvedPost(job), false, deps, log);
+      return;
+    }
     case 'job.discarded': {
-      const schema =
-        event.type === 'job.needs_review' ? jobNeedsReviewSchema : event.type === 'job.scored' ? jobScoredSchema : jobDiscardedSchema;
-      const job = parse(schema, event, deps.logger);
-      if (!job) return;
-      // Stage 5 posts and updates review-queue messages here. Until then the
-      // version is recorded so ordering already works when that lands. Note
-      // for stage 5: advance only after the Discord update succeeded, or a
-      // retry would be skipped as stale.
-      const fresh = await deps.jobVersions.advance(`${backend}:${job.job_id}`, job.job_version);
-      deps.logger.info(fresh ? 'job event received' : 'stale job event ignored', {
-        ...log,
-        jobId: job.job_id,
-        jobVersion: job.job_version,
-      });
+      const job = parse(jobDiscardedSchema, event, deps.logger);
+      if (job) await updateReviewPosts(backend, job.job_id, job.job_version, resolvedPost(job), false, deps, log);
       return;
     }
     case 'operation.completed': {
       const op = parse(operationCompletedSchema, event, deps.logger);
-      if (op) deps.logger.info('operation completed', { ...log, operationId: op.operation_id, status: op.status });
+      if (!op) return;
+      for (const channel of deps.reviewChannels(backend)) await deps.discord.postChannelMessage(channel, operationPost(op));
+      deps.logger.info('operation completed', { ...log, operationId: op.operation_id, status: op.status });
       return;
     }
     default:
       // New event types may appear without notice (API_CONVENTIONS §1).
       deps.logger.info('unhandled webhook event type', log);
   }
+}
+
+/**
+ * Posts or edits the job's message in every review channel of the backend's
+ * Discord servers. A job that enters review gets a post (or its old post is
+ * edited if it was posted before); a decision only edits existing posts. The
+ * job version is recorded after Discord accepted every update, so a failed
+ * update is retried rather than skipped as stale (server WEBHOOKS §3).
+ */
+async function updateReviewPosts(
+  backend: string,
+  jobId: string,
+  version: number,
+  message: OutgoingMessage,
+  create: boolean,
+  deps: EventDeps,
+  log: Record<string, unknown>,
+): Promise<void> {
+  const key = `${backend}:${jobId}`;
+  const current = await deps.jobVersions.current(key);
+  if (current !== null && current >= version) {
+    deps.logger.info('stale job event ignored', { ...log, jobId, jobVersion: version });
+    return;
+  }
+  const existing = await deps.reviewPosts.find(backend, jobId);
+  for (const channelId of deps.reviewChannels(backend)) {
+    const post = existing.find((p) => p.channelId === channelId);
+    if (post) {
+      try {
+        await deps.discord.editChannelMessage(channelId, post.messageId, message);
+        continue;
+      } catch (err) {
+        // The post was deleted by hand: post again if the job is (back) in review.
+        if (!(err instanceof DiscordApiError) || err.retryable || err.status !== 404 || !create) throw err;
+      }
+    } else if (!create) {
+      continue;
+    }
+    const messageId = await deps.discord.postChannelMessage(channelId, message);
+    await deps.reviewPosts.put({ backend, jobId, channelId, messageId });
+  }
+  await deps.jobVersions.advance(key, version);
+  deps.logger.info('review posts updated', { ...log, jobId, jobVersion: version });
 }
 
 /**

@@ -75,6 +75,17 @@ export class DiscordRest {
     return this.send('POST', `/webhooks/${this.options.applicationId}/${interactionToken}`, message, files, false);
   }
 
+  /** Posts in a server channel (review queue). Returns the new message's ID. */
+  async postChannelMessage(channelId: string, message: OutgoingMessage): Promise<string> {
+    const res = (await this.send('POST', `/channels/${channelId}/messages`, message, [], true)) as { id: string };
+    return res.id;
+  }
+
+  /** Edits a message the bot posted in a channel. */
+  async editChannelMessage(channelId: string, messageId: string, message: OutgoingMessage): Promise<void> {
+    await this.send('PATCH', `/channels/${channelId}/messages/${messageId}`, message, [], true);
+  }
+
   /** Opens (or reuses) the DM channel with a user and posts there. */
   async sendDirectMessage(userId: string, message: OutgoingMessage): Promise<void> {
     const channel = (await this.send('POST', '/users/@me/channels', { recipient_id: userId }, [], true)) as {

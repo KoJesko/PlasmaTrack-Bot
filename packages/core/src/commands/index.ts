@@ -9,6 +9,19 @@ import {
   leaderboardComponent,
   leaderboardTask,
 } from './lists.ts';
+import {
+  adminsCommand,
+  auditCommand,
+  configCommand,
+  manageComponents,
+  manageTask,
+  releaseCommand,
+  revocationCommand,
+  tmpflagsCommand,
+} from './mod/manage.ts';
+import { bonusCommand, opsTasks, recalcCommand, recalcComponents, recalcModals } from './mod/ops.ts';
+import { grantComponent, playerCommand, playerTasks } from './mod/player.ts';
+import { reviewCommand, reviewComponents, reviewModals, reviewTasks } from './mod/review.ts';
 import { noticesCommand, noticesTask } from './notices.ts';
 import { profileCommand, profileTask } from './profile.ts';
 import {
@@ -22,9 +35,37 @@ import {
 } from './token.ts';
 
 export const handlers: InteractionHandlers = {
-  commands: [aboutCommand, noticesCommand, tokenCommand, nameCommand, profileCommand, jobCommand, jobsCommand, leaderboardCommand],
-  components: [...tokenComponents, jobsComponent, leaderboardComponent],
-  modals: [],
+  commands: [
+    aboutCommand,
+    noticesCommand,
+    tokenCommand,
+    nameCommand,
+    profileCommand,
+    jobCommand,
+    jobsCommand,
+    leaderboardCommand,
+    // Moderators
+    reviewCommand,
+    recalcCommand,
+    bonusCommand,
+    playerCommand,
+    configCommand,
+    releaseCommand,
+    revocationCommand,
+    adminsCommand,
+    auditCommand,
+    tmpflagsCommand,
+  ],
+  components: [
+    ...tokenComponents,
+    jobsComponent,
+    leaderboardComponent,
+    grantComponent,
+    ...reviewComponents,
+    ...recalcComponents,
+    ...manageComponents,
+  ],
+  modals: [...reviewModals, ...recalcModals],
 };
 
 export const tasks: TaskDefinition[] = [
@@ -37,4 +78,8 @@ export const tasks: TaskDefinition[] = [
   jobTask,
   jobsTask,
   leaderboardTask,
+  ...reviewTasks,
+  ...opsTasks,
+  ...playerTasks,
+  manageTask,
 ];

@@ -21,10 +21,11 @@ export const GENERIC_FAILURE = 'Sorry, something went wrong. Please try again la
 /** Which backend serves a Discord server; null outside a configured server. */
 export interface BackendResolver {
   forGuild(guildId: string | undefined): { name: string; api: PlasmaTrackApi | null } | null;
+  byName(name: string): PlasmaTrackApi | null;
 }
 
 /** Everything the queue consumer needs. `api` and `backend` are filled in per interaction. */
-export type ConsumerDeps = Omit<TaskDeps, 'api' | 'backend'> & EventDeps & { backends: BackendResolver };
+export type ConsumerDeps = Omit<TaskDeps, 'api' | 'backend' | 'apiByName'> & EventDeps & { backends: BackendResolver };
 
 /** Runs one queued message. The host's queue consumer maps the result to ack/retry. */
 export async function processQueueMessage(
@@ -39,7 +40,12 @@ export async function processQueueMessage(
       return processPlayerDm(message, deps);
     default: {
       const backend = deps.backends.forGuild(message.interaction.guildId);
-      return processInteractionMessage(message, tasks, { ...deps, api: backend?.api ?? null, backend: backend?.name ?? null });
+      return processInteractionMessage(message, tasks, {
+        ...deps,
+        api: backend?.api ?? null,
+        backend: backend?.name ?? null,
+        apiByName: (name) => deps.backends.byName(name),
+      });
     }
   }
 }

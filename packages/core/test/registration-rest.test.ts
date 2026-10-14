@@ -7,21 +7,37 @@ import { DiscordApiError, DiscordRest } from '../src/discord/rest.ts';
 import { APP_ID, INTERACTION_TOKEN } from './helpers.ts';
 
 describe('buildCommandRegistration', () => {
-  const reg = buildCommandRegistration([
-    ...handlers.commands,
-    { access: 'moderator', json: { name: 'review', description: 'test' }, handle: () => ({ kind: 'modal', modal: { custom_id: 'x', title: 'x', components: [] } }) },
-  ]);
+  const reg = buildCommandRegistration(handlers.commands);
+  const moderator = new Set(handlers.commands.filter((c) => c.access === 'moderator').map((c) => c.json.name));
 
   it('registers nothing globally, so no command works in DMs', () => {
     expect(reg.global).toEqual([]);
   });
 
   it('registers every command per server; moderator commands hidden by default', () => {
-    expect(reg.guild.map((c) => c.name).sort()).toEqual(['about', 'job', 'jobs', 'leaderboard', 'name', 'notices', 'profile', 'review', 'token']);
+    expect(reg.guild.map((c) => c.name).sort()).toEqual(
+      ['about', 'admins', 'audit', 'bonus', 'config', 'job', 'jobs', 'leaderboard', 'name', 'notices', 'player', 'profile', 'recalc', 'release', 'review', 'revocation', 'tmpflags', 'token'],
+    );
+    expect([...moderator].sort()).toEqual(['admins', 'audit', 'bonus', 'config', 'player', 'recalc', 'release', 'review', 'revocation', 'tmpflags']);
     for (const c of reg.guild) {
       expect('contexts' in c).toBe(false);
-      expect(c.default_member_permissions).toBe(c.name === 'review' ? '0' : undefined);
+      expect(c.default_member_permissions).toBe(moderator.has(c.name) ? '0' : undefined);
     }
+  });
+
+  it('stays within Discord’s limits (names, descriptions, options)', () => {
+    const walk = (o: { name: string; description?: string; options?: unknown[]; choices?: { name: string }[] }, path: string) => {
+      expect(o.name, path).toMatch(/^[-_a-z0-9]{1,32}$/);
+      expect((o.description ?? '').length, path).toBeLessThanOrEqual(100);
+      expect((o.options ?? []).length, path).toBeLessThanOrEqual(25);
+      for (const c of o.choices ?? []) expect(c.name.length, path).toBeLessThanOrEqual(100);
+      // Required options must come before optional ones.
+      const req = (o.options ?? []).map((x) => (x as { required?: boolean }).required === true);
+      expect(req.indexOf(false) === -1 || req.lastIndexOf(true) < req.indexOf(false), `${path} option order`).toBe(true);
+      for (const x of (o.options ?? []) as (typeof o)[]) walk(x, `${path}/${x.name}`);
+    };
+    for (const c of reg.guild) walk(c as never, c.name);
+    expect(reg.guild.length).toBeLessThanOrEqual(100);
   });
 
   it('rejects duplicate names', () => {

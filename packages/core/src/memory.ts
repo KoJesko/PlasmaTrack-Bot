@@ -6,6 +6,10 @@ import type {
   JobVersionStore,
   Notice,
   NoticeStore,
+  ReviewPost,
+  ReviewPostStore,
+  TokenGrant,
+  TokenGrantStore,
   WorkQueue,
 } from './ports.ts';
 import { systemClock } from './ports.ts';
@@ -78,6 +82,10 @@ export class MemoryJobVersionStore implements JobVersionStore {
     return true;
   }
 
+  async current(jobId: string): Promise<number | null> {
+    return this.versions.get(jobId)?.version ?? null;
+  }
+
   async purgeOlderThan(before: number): Promise<number> {
     let n = 0;
     for (const [id, v] of this.versions) {
@@ -148,5 +156,62 @@ export class MemoryNoticeStore implements NoticeStore {
     return (this.byUser.get(discordUserId) ?? [])
       .filter((e) => !e.read && e.notice.expiresAt > now && e.notice.backend === backend)
       .map((e) => e.notice);
+  }
+}
+
+export class MemoryTokenGrantStore implements TokenGrantStore {
+  readonly grants = new Map<string, TokenGrant>();
+  private readonly clock: Clock;
+
+  constructor(clock: Clock = systemClock) {
+    this.clock = clock;
+  }
+
+  async create(grant: TokenGrant): Promise<void> {
+    this.grants.set(grant.id, { ...grant });
+  }
+
+  async get(id: string): Promise<TokenGrant | null> {
+    const g = this.grants.get(id);
+    return g ? { ...g } : null;
+  }
+
+  async pendingFor(discordUserId: string, backend: string): Promise<TokenGrant[]> {
+    const now = this.clock.now();
+    return [...this.grants.values()]
+      .filter((g) => g.discordUserId === discordUserId && g.backend === backend && g.usedAt === null && g.expiresAt > now)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((g) => ({ ...g }));
+  }
+
+  async markUsed(id: string, at: number): Promise<void> {
+    const g = this.grants.get(id);
+    if (g) g.usedAt = at;
+  }
+
+  async purgeExpired(): Promise<number> {
+    const now = this.clock.now();
+    let n = 0;
+    for (const [id, g] of this.grants) {
+      if (g.expiresAt <= now) {
+        this.grants.delete(id);
+        n++;
+      }
+    }
+    return n;
+  }
+}
+
+export class MemoryReviewPostStore implements ReviewPostStore {
+  readonly posts: ReviewPost[] = [];
+
+  async put(post: ReviewPost): Promise<void> {
+    const i = this.posts.findIndex((p) => p.backend === post.backend && p.jobId === post.jobId && p.channelId === post.channelId);
+    if (i === -1) this.posts.push({ ...post });
+    else this.posts[i] = { ...post };
+  }
+
+  async find(backend: string, jobId: string): Promise<ReviewPost[]> {
+    return this.posts.filter((p) => p.backend === backend && p.jobId === jobId).map((p) => ({ ...p }));
   }
 }

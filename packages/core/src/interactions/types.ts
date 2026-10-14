@@ -10,7 +10,7 @@ import type { PlasmaTrackApi } from '../api/client.ts';
 import type { OutgoingFile, OutgoingMessage } from '../discord/rest.ts';
 import type { Logger } from '../log.ts';
 import type { ImageRenderer } from '../render/client.ts';
-import type { Clock, NoticeKind, NoticeStore } from '../ports.ts';
+import type { Clock, NoticeKind, NoticeStore, TokenGrantStore } from '../ports.ts';
 import type { TruckersMpLookup } from '../truckersmp/client.ts';
 import type { WebhookEnvelope } from '../webhooks/events.ts';
 
@@ -114,6 +114,8 @@ export interface DiscordSender {
   editOriginal(interactionToken: string, message: OutgoingMessage, files?: OutgoingFile[]): Promise<unknown>;
   followup(interactionToken: string, message: OutgoingMessage, files?: OutgoingFile[]): Promise<unknown>;
   sendDirectMessage(userId: string, message: OutgoingMessage): Promise<void>;
+  postChannelMessage(channelId: string, message: OutgoingMessage): Promise<string>;
+  editChannelMessage(channelId: string, messageId: string, message: OutgoingMessage): Promise<void>;
 }
 
 export interface TaskDeps {
@@ -131,6 +133,11 @@ export interface TaskDeps {
   backend: string | null;
   /** Confirms reported TruckersMP accounts against TruckersMP's public API. */
   truckersmp: TruckersMpLookup;
+  /** Moderator-issued tokens waiting for their player. */
+  grants: TokenGrantStore;
+  /** A backend's API by name (a token grant remembers its backend), or null if not connected. */
+  apiByName(name: string): PlasmaTrackApi | null;
+  noticeTtlDays: number;
 }
 
 export interface TaskOutput {

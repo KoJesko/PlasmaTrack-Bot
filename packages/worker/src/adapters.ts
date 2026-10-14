@@ -10,6 +10,10 @@ import type {
   Notice,
   NoticeKind,
   NoticeStore,
+  ReviewPost,
+  ReviewPostStore,
+  TokenGrant,
+  TokenGrantStore,
   WorkQueue,
 } from '@plasmatrack/core';
 import { systemClock } from '@plasmatrack/core';
@@ -86,6 +90,11 @@ export class D1JobVersionStore implements JobVersionStore {
       .bind(jobId, version, this.clock.now())
       .run();
     return result.meta.changes === 1;
+  }
+
+  async current(jobId: string): Promise<number | null> {
+    const row = await this.db.prepare('SELECT version FROM job_versions WHERE job_id = ?1').bind(jobId).first<{ version: number }>();
+    return row?.version ?? null;
   }
 
   async purgeOlderThan(before: number): Promise<number> {
@@ -184,5 +193,99 @@ export class R2BlobCache implements BlobCache {
 
   async put(key: string, blob: CachedBlob): Promise<void> {
     await this.bucket.put(key, blob.bytes, { httpMetadata: { contentType: blob.contentType } });
+  }
+}
+
+interface TokenGrantRow {
+  id: string;
+  backend: string;
+  discord_user_id: string;
+  moderator_id: string;
+  reason: string;
+  created_at: number;
+  expires_at: number;
+  used_at: number | null;
+}
+
+const toGrant = (r: TokenGrantRow): TokenGrant => ({
+  id: r.id,
+  backend: r.backend,
+  discordUserId: r.discord_user_id,
+  moderatorId: r.moderator_id,
+  reason: r.reason,
+  createdAt: r.created_at,
+  expiresAt: r.expires_at,
+  usedAt: r.used_at,
+});
+
+export class D1TokenGrantStore implements TokenGrantStore {
+  private readonly db: D1Database;
+  private readonly clock: Clock;
+
+  constructor(db: D1Database, clock: Clock = systemClock) {
+    this.db = db;
+    this.clock = clock;
+  }
+
+  async create(g: TokenGrant): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO token_grants (id, backend, discord_user_id, moderator_id, reason, created_at, expires_at, used_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+      )
+      .bind(g.id, g.backend, g.discordUserId, g.moderatorId, g.reason, g.createdAt, g.expiresAt, g.usedAt)
+      .run();
+  }
+
+  async get(id: string): Promise<TokenGrant | null> {
+    const row = await this.db.prepare('SELECT * FROM token_grants WHERE id = ?1').bind(id).first<TokenGrantRow>();
+    return row ? toGrant(row) : null;
+  }
+
+  async pendingFor(discordUserId: string, backend: string): Promise<TokenGrant[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM token_grants
+         WHERE discord_user_id = ?1 AND backend = ?2 AND used_at IS NULL AND expires_at > ?3
+         ORDER BY created_at DESC`,
+      )
+      .bind(discordUserId, backend, this.clock.now())
+      .all<TokenGrantRow>();
+    return results.map(toGrant);
+  }
+
+  async markUsed(id: string, at: number): Promise<void> {
+    await this.db.prepare('UPDATE token_grants SET used_at = ?2 WHERE id = ?1').bind(id, at).run();
+  }
+
+  async purgeExpired(): Promise<number> {
+    const result = await this.db.prepare('DELETE FROM token_grants WHERE expires_at <= ?1').bind(this.clock.now()).run();
+    return result.meta.changes;
+  }
+}
+
+export class D1ReviewPostStore implements ReviewPostStore {
+  private readonly db: D1Database;
+
+  constructor(db: D1Database) {
+    this.db = db;
+  }
+
+  async put(p: ReviewPost): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO review_posts (backend, job_id, channel_id, message_id) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (backend, job_id, channel_id) DO UPDATE SET message_id = excluded.message_id`,
+      )
+      .bind(p.backend, p.jobId, p.channelId, p.messageId)
+      .run();
+  }
+
+  async find(backend: string, jobId: string): Promise<ReviewPost[]> {
+    const { results } = await this.db
+      .prepare('SELECT backend, job_id, channel_id, message_id FROM review_posts WHERE backend = ?1 AND job_id = ?2')
+      .bind(backend, jobId)
+      .all<{ backend: string; job_id: string; channel_id: string; message_id: string }>();
+    return results.map((r) => ({ backend: r.backend, jobId: r.job_id, channelId: r.channel_id, messageId: r.message_id }));
   }
 }
