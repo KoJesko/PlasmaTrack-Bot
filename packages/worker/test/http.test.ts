@@ -1,11 +1,12 @@
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
 import { command, envWithRecordingQueue, INTERACTION_TOKEN, signedRequest, USER_A } from './helpers.ts';
 
-async function call(request: Request, testEnv = env) {
+async function call(request: Request, testEnv: Env = env) {
   const ctx = createExecutionContext();
-  const response = await worker.fetch(request, testEnv, ctx);
+  const response = await worker.fetch(request as Request<unknown, IncomingRequestCfProperties>, testEnv, ctx);
   await waitOnExecutionContext(ctx);
   return response;
 }
