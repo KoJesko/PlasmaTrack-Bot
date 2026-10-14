@@ -12,16 +12,18 @@ describe('memory adapters', () => {
     expect(await store.claim('evt_1', 60)).toBe(true);
   });
 
-  it('notices are isolated per Discord user and idempotent by id', async () => {
+  it('notices are isolated per Discord user and per backend, and idempotent by id', async () => {
     const clock = new FakeClock();
     const store = new MemoryNoticeStore(clock);
-    const n = { id: 'n1', kind: 'speed_penalty' as const, text: 't', createdAt: clock.t, expiresAt: clock.t + 1000 };
+    const n = { id: 'n1', backend: 'production', kind: 'speed_penalty' as const, text: 't', createdAt: clock.t, expiresAt: clock.t + 1000 };
     await store.add(USER_A, n);
     await store.add(USER_A, n);
-    expect(await store.countUnread(USER_A)).toBe(1);
-    expect(await store.countUnread(USER_B)).toBe(0);
+    await store.add(USER_A, { ...n, id: 'n2', backend: 'test' });
+    expect(await store.countUnread(USER_A, 'production')).toBe(1);
+    expect(await store.countUnread(USER_A, 'test')).toBe(1);
+    expect(await store.countUnread(USER_B, 'production')).toBe(0);
     await store.markRead(USER_B, ['n1']);
-    expect(await store.countUnread(USER_A)).toBe(1);
+    expect(await store.countUnread(USER_A, 'production')).toBe(1);
   });
 
   it('the work queue only accepts JSON-serializable items', async () => {

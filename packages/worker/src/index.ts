@@ -1,6 +1,7 @@
 import {
   ConfigError,
   createLogger,
+  demoApi,
   RendererClient,
   DiscordRest,
   handleInteraction,
@@ -33,6 +34,23 @@ import type { Env } from './env.ts';
 interface Runtime {
   config: BotConfig;
   logger: Logger;
+  apis: Map<string, PlasmaTrackApi | null>;
+}
+
+/** The API client for a backend: its server, the built-in demo, or null if not connected yet. */
+function backendApi(rt: Runtime, name: string): PlasmaTrackApi | null {
+  if (!rt.apis.has(name)) {
+    const b = rt.config.BACKENDS[name];
+    const api = !b
+      ? null
+      : b.demo
+        ? demoApi()
+        : b.apiUrl && b.botToken
+          ? new PlasmaTrackApi({ baseUrl: b.apiUrl, token: b.botToken })
+          : null;
+    rt.apis.set(name, api);
+  }
+  return rt.apis.get(name) ?? null;
 }
 
 let cached: { env: Env; runtime: Runtime } | undefined;
@@ -42,7 +60,7 @@ function runtime(env: Env): Runtime {
   if (cached?.env === env) return cached.runtime;
   const config = parseBotConfig(env as unknown as Record<string, unknown>);
   const logger = createLogger(undefined, secretValues(config));
-  cached = { env, runtime: { config, logger } };
+  cached = { env, runtime: { config, logger, apis: new Map() } };
   return cached.runtime;
 }
 
@@ -57,10 +75,12 @@ function consumerDeps(env: Env, rt: Runtime): ConsumerDeps {
       key: rt.config.RENDERER_KEY,
       cache: new R2BlobCache(env.RENDER_CACHE),
     }),
-    api:
-      rt.config.PLASMATRACK_API_URL && rt.config.PLASMATRACK_BOT_TOKEN
-        ? new PlasmaTrackApi({ baseUrl: rt.config.PLASMATRACK_API_URL, token: rt.config.PLASMATRACK_BOT_TOKEN })
-        : null,
+    backends: {
+      forGuild: (guildId) => {
+        const guild = guildId ? rt.config.GUILDS[guildId] : undefined;
+        return guild ? { name: guild.backend, api: backendApi(rt, guild.backend) } : null;
+      },
+    },
     truckersmp: new TruckersMpClient({ cache: new R2BlobCache(env.RENDER_CACHE) }),
     dedupe: new D1DedupeStore(env.DB),
     jobVersions: new D1JobVersionStore(env.DB),
@@ -80,7 +100,7 @@ async function handleWebhookRequest(request: Request, env: Env, rt: Runtime) {
       eventIdHeader: request.headers.get(WEBHOOK_EVENT_ID_HEADER),
     },
     {
-      secrets: rt.config.PLASMATRACK_WEBHOOK_SECRET ?? [],
+      secrets: Object.fromEntries(Object.values(rt.config.BACKENDS).map((b) => [b.name, b.webhookSecrets])),
       queue: new CloudflareWorkQueue(env.WORK_QUEUE),
       logger: rt.logger,
       clock: systemClock,
@@ -110,8 +130,7 @@ async function handleInteractionRequest(request: Request, env: Env, ctx: Executi
   const { response, background } = await handleInteraction(interaction, {
     handlers,
     applicationId: rt.config.DISCORD_APPLICATION_ID,
-    guildIds: rt.config.DISCORD_GUILD_ID,
-    moderatorRoleIds: rt.config.MODERATOR_ROLE_IDS,
+    guilds: rt.config.GUILDS,
     queue,
     logger: rt.logger,
     clock: systemClock,

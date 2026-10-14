@@ -8,7 +8,7 @@ import { NOTICES_TASK } from '../interactions/tasks.ts';
 const PAGE = 10;
 
 export const noticesCommand: CommandDefinition = {
-  access: 'everyone',
+  access: 'member',
   json: { name: 'notices', description: 'Read your notices that could not be sent as a DM (only you can see them)' },
   handle: () => ({ kind: 'defer', ephemeral: true, task: { name: NOTICES_TASK, input: null } }),
 };
@@ -18,12 +18,13 @@ export const noticesTask: TaskDefinition = {
   async run(_input, { interaction, deps }) {
     // Scoped to the invoking user by construction: the user ID comes from the
     // signed interaction, never from command input.
-    const notices = await deps.notices.listUnread(interaction.userId, PAGE);
+    if (!deps.backend) return { message: { content: 'You have no unread notices.', flags: MessageFlags.Ephemeral } };
+    const notices = await deps.notices.listUnread(interaction.userId, deps.backend, PAGE);
     if (notices.length === 0) {
       return { message: { content: 'You have no unread notices.', flags: MessageFlags.Ephemeral } };
     }
     const lines = notices.map((n) => `• <t:${Math.floor(n.createdAt / 1000)}:f> ${n.text}`);
-    const remaining = (await deps.notices.countUnread(interaction.userId)) - notices.length;
+    const remaining = (await deps.notices.countUnread(interaction.userId, deps.backend)) - notices.length;
     return {
       message: {
         flags: MessageFlags.Ephemeral,

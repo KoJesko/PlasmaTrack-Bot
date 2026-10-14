@@ -7,6 +7,8 @@ import {
 import { createLogger, type LogLevel } from '../src/log.ts';
 import { MemoryDedupeStore, MemoryJobVersionStore, MemoryNoticeStore, MemoryWorkQueue } from '../src/memory.ts';
 import type { Clock } from '../src/ports.ts';
+import type { PlasmaTrackApi } from '../src/api/client.ts';
+import type { GuildSettings } from '../src/config.ts';
 import type { DiscordSender, QueueMessage } from '../src/interactions/types.ts';
 import type { ConsumerDeps } from '../src/interactions/tasks.ts';
 import type { RouterDeps } from '../src/interactions/router.ts';
@@ -15,6 +17,12 @@ import { handlers } from '../src/commands/index.ts';
 export const APP_ID = '100000000000000001';
 export const GUILD_ID = '200000000000000002';
 export const MOD_ROLE = '300000000000000003';
+export const MEMBER_ROLE = '300000000000000013';
+export const BACKEND = 'production';
+/** Test guild settings: one member role, one moderator role. */
+export const GUILDS: Record<string, GuildSettings> = {
+  [GUILD_ID]: { backend: BACKEND, member_roles: [MEMBER_ROLE], moderator_roles: [MOD_ROLE], review_channel: undefined },
+};
 export const USER_A = '400000000000000004';
 export const USER_B = '500000000000000005';
 export const INTERACTION_TOKEN = 'aW50ZXJhY3Rpb246MTIzNDU2Nzg5MDpzZWNyZXQtdG9rZW4';
@@ -56,7 +64,8 @@ function base(opts: Base) {
         channel: { id: '1', type: 0 },
         member: {
           user,
-          roles: opts.roles ?? [],
+          // Members by default: every PlasmaTrack command needs a role.
+          roles: opts.roles ?? [MEMBER_ROLE],
           permissions: '0',
           joined_at: '2026-01-01T00:00:00Z',
           deaf: false,
@@ -96,8 +105,7 @@ export function routerDeps(overrides: Partial<RouterDeps> = {}) {
   const deps: RouterDeps = {
     handlers,
     applicationId: APP_ID,
-    guildIds: [GUILD_ID],
-    moderatorRoleIds: [MOD_ROLE],
+    guilds: GUILDS,
     queue,
     logger: captureLogger().logger,
     clock: new FakeClock(),
@@ -149,18 +157,20 @@ export function taskDeps(clock = new FakeClock()) {
   const queue = new MemoryWorkQueue<QueueMessage>();
   const dedupe = new MemoryDedupeStore(clock);
   const jobVersions = new MemoryJobVersionStore(clock);
+  /** The test guild's backend; tests set `backend.api` to connect it. */
+  const backend: { name: string; api: PlasmaTrackApi | null } = { name: BACKEND, api: null };
   const deps: ConsumerDeps = {
     discord,
     notices,
     clock,
     logger,
     renderer,
-    api: null,
+    backends: { forGuild: (guildId) => (guildId && GUILDS[guildId] ? backend : null) },
     truckersmp: { player: async () => null },
     dedupe,
     jobVersions,
     queue,
     noticeTtlDays: 30,
   };
-  return { deps, discord, notices, clock, lines, queue, dedupe, jobVersions };
+  return { deps, backend, discord, notices, clock, lines, queue, dedupe, jobVersions };
 }

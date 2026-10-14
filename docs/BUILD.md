@@ -63,7 +63,8 @@ Check it: `curl http://127.0.0.1:8788/healthz` → `{"ok":true,"basemaps":{...}}
     cd packages/worker
     cp wrangler.sample.toml wrangler.toml     # fill in IDs (docs/DEPLOY.md)
     cp .dev.vars.example .dev.vars            # DISCORD_BOT_TOKEN, RENDERER_KEY (same as the renderer's)
-                                              # optional: PLASMATRACK_BOT_TOKEN, PLASMATRACK_WEBHOOK_SECRET
+                                              # optional, per backend: PLASMATRACK_BOT_TOKEN_<NAME>,
+                                              # PLASMATRACK_WEBHOOK_SECRET_<NAME>
     npx wrangler d1 migrations apply plasmatrack-bot --local
     npx wrangler dev
 
@@ -77,9 +78,9 @@ developer portal. Discord sends a signed PING when you save; the bot must answer
     npm run register-commands -w @plasmatrack/worker -- --dry-run   # print what would be registered
     npm run register-commands -w @plasmatrack/worker                 # register
 
-This needs `DISCORD_APPLICATION_ID`, `DISCORD_GUILD_ID` and `DISCORD_BOT_TOKEN` in the
-environment or in `packages/worker/.dev.vars`. Player commands are registered globally
-(guild and DMs). Moderator commands are registered only in the guild.
+This needs `DISCORD_APPLICATION_ID`, `DISCORD_GUILD_ID` (comma-separated: the servers in
+`GUILDS`) and `DISCORD_BOT_TOKEN` in the environment or in `packages/worker/.dev.vars`. Every
+command is registered per server; global commands are cleared, so nothing works in DMs.
 
 Wrangler sends anonymous usage telemetry by default; set `WRANGLER_SEND_METRICS=false`
 to turn it off.

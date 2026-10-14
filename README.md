@@ -30,9 +30,10 @@ PlasmaTrack server ──webhooks──▶  │  answers within 3 s (Discord)   
 
 Key behaviour:
 - **Discord's 3-second deadline.** Command handlers are synchronous and get no I/O, so the first response is always immediate. Anything that needs I/O replies "thinking…" and runs from the queue.
-- **Moderator commands** are registered only in the PlasmaTrack guild, so they can't be used in DMs. The bot also checks the moderator role on every use.
+- **Access:** commands work only in the configured Discord servers, never in DMs. Every command except `/about` needs one of that server's member or moderator roles, checked on every use. Moderator commands need a moderator role, and the PlasmaTrack server must also list the person as an admin.
+- **One backend per Discord server:** each server is mapped to its own PlasmaTrack server (production, test…), so a test server never sees production data. Webhooks tell backends apart by their signing secret; notices, dedupe and job versions are kept per backend.
 - **Player tokens** are only ever shown ephemerally. They are never logged, queued or stored.
-- **Replies** to `/profile`, `/job`, `/jobs` and `/leaderboard` are visible to everyone unless `private:true` is used; `/token`, `/name` and `/notices` are always private.
+- **Replies** to `/profile`, `/job`, `/jobs` and `/leaderboard` are visible to everyone unless `private:true` is used; `/token`, `/name`, `/notices` and all moderator commands are always private.
 - **Distances** are shown as the server sends them, miles first with km in brackets. The bot never converts or rounds them.
 - **TruckersMP accounts** the tracker reported are checked against TruckersMP's public API: an account is shown as confirmed only when its TruckersMP profile shows the same Discord account. Unconfirmed ones are shown only to the player, privately. Lookups are cached for a day.
 - **Undelivered notices** (DMs closed) are stored per Discord user and shown only to that user, ephemerally, via `/notices`.

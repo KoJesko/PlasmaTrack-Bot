@@ -1,13 +1,15 @@
 import { InteractionResponseType, MessageFlags } from 'discord-api-types/v10';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { handlers } from '../src/commands/index.ts';
-import { handleInteraction, NOT_ALLOWED, START_FAILED } from '../src/interactions/router.ts';
+import { handleInteraction, NOT_ALLOWED, NOT_HERE, NOT_MEMBER, START_FAILED } from '../src/interactions/router.ts';
 import type { InteractionHandlers, QueueMessage } from '../src/interactions/types.ts';
 import type { WorkQueue } from '../src/ports.ts';
 import {
   buttonInteraction,
   commandInteraction,
   GUILD_ID,
+  GUILDS,
+  MEMBER_ROLE,
   INTERACTION_TOKEN,
   modalInteraction,
   MOD_ROLE,
@@ -25,7 +27,7 @@ const testHandlers: InteractionHandlers = {
       handle: () => ({ kind: 'reply', ephemeral: true, message: { content: 'mod ok' } }),
     },
     {
-      access: 'everyone',
+      access: 'member',
       json: { name: 'boom', description: 'test' },
       handle: () => {
         throw new Error('handler bug');
@@ -80,7 +82,7 @@ describe('handleInteraction', () => {
 
   it('/notices defers ephemerally and enqueues its task with the interaction reference', async () => {
     const { deps, queue } = routerDeps();
-    const r = await handleInteraction(commandInteraction('notices', { guild: false }), deps);
+    const r = await handleInteraction(commandInteraction('notices'), deps);
     expect(r.response).toEqual({
       type: InteractionResponseType.DeferredChannelMessageWithSource,
       data: { flags: MessageFlags.Ephemeral },
@@ -136,30 +138,50 @@ describe('handleInteraction', () => {
   });
 
   describe('moderator access', () => {
-    const cases: [string, Parameters<typeof commandInteraction>[1], boolean][] = [
+    const cases: [string, Parameters<typeof commandInteraction>[1], boolean | 'dm'][] = [
       ['in the guild with a moderator role', { roles: [MOD_ROLE] }, true],
       ['in the guild without the role', { roles: ['999999999999999999'] }, false],
-      ['in a DM (no member.roles)', { guild: false }, false],
+      ['in a DM (no member.roles)', { guild: false }, 'dm'],
     ];
     for (const [label, opts, allowed] of cases) {
-      it(`${allowed ? 'allows' : 'refuses'} a moderator command ${label}`, async () => {
+      it(`${allowed === true ? 'allows' : 'refuses'} a moderator command ${label}`, async () => {
         const { deps } = routerDeps({ handlers: testHandlers });
         const r = await handleInteraction(commandInteraction('modtool', opts), deps);
         const content = (r.response as { data: { content: string } }).data.content;
-        expect(content).toBe(allowed ? 'mod ok' : NOT_ALLOWED);
+        expect(content).toBe(allowed === true ? 'mod ok' : allowed === 'dm' ? NOT_HERE : NOT_ALLOWED);
       });
     }
 
-    it('refuses a moderator command from another guild even with a same-ID role', async () => {
-      const { deps } = routerDeps({ handlers: testHandlers, guildIds: ['888888888888888888'] });
+    it('refuses any command in a server that is not configured', async () => {
+      const other = { '888888888888888888': GUILDS[GUILD_ID]! };
+      const { deps } = routerDeps({ handlers: testHandlers, guilds: other });
       const r = await handleInteraction(commandInteraction('modtool', { roles: [MOD_ROLE] }), deps);
-      expect((r.response as { data: { content: string } }).data.content).toBe(NOT_ALLOWED);
+      expect((r.response as { data: { content: string } }).data.content).toBe(NOT_HERE);
     });
 
-    it('allows moderator commands in any configured guild', async () => {
-      const { deps } = routerDeps({ handlers: testHandlers, guildIds: ['888888888888888888', GUILD_ID] });
+    it('uses each server’s own moderator roles', async () => {
+      const guilds = {
+        '888888888888888888': { ...GUILDS[GUILD_ID]!, moderator_roles: ['777777777777777777'] },
+        [GUILD_ID]: GUILDS[GUILD_ID]!,
+      };
+      const { deps } = routerDeps({ handlers: testHandlers, guilds });
       const r = await handleInteraction(commandInteraction('modtool', { roles: [MOD_ROLE] }), deps);
       expect((r.response as { data: { content: string } }).data.content).toBe('mod ok');
+      const elsewhere = await handleInteraction(commandInteraction('modtool', { roles: ['777777777777777777'] }), deps);
+      expect((elsewhere.response as { data: { content: string } }).data.content).toBe(NOT_ALLOWED);
+    });
+
+    it('member commands need a member or moderator role; /about is open to all', async () => {
+      const { deps } = routerDeps({ handlers: testHandlers });
+      const content = async (opts: Parameters<typeof commandInteraction>[1], name = 'boom') =>
+        ((await handleInteraction(commandInteraction(name, opts), deps)).response as { data: { content: string } }).data.content;
+      expect(await content({ roles: [] })).toBe(NOT_MEMBER);
+      expect(await content({ roles: [MEMBER_ROLE] })).toBe('Something went wrong handling that.');
+      expect(await content({ roles: [MOD_ROLE] })).toBe('Something went wrong handling that.');
+      expect(await content({ guild: false })).toBe(NOT_HERE);
+      const about = await handleInteraction(commandInteraction('about', { guild: false }), deps);
+      expect(about.response.type).toBe(InteractionResponseType.ChannelMessageWithSource);
+      expect(JSON.stringify(about.response)).toContain('PlasmaTrack');
     });
 
     it('also gates buttons and modal submissions', async () => {

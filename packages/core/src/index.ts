@@ -24,4 +24,5 @@ export * from './webhooks/receive.ts';
 export * from './webhooks/messages.ts';
 export * from './webhooks/process.ts';
 export * from './truckersmp/client.ts';
+export { demoApi } from './demo/index.ts';
 export { handlers, tasks } from './commands/index.ts';

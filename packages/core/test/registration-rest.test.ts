@@ -12,16 +12,16 @@ describe('buildCommandRegistration', () => {
     { access: 'moderator', json: { name: 'review', description: 'test' }, handle: () => ({ kind: 'modal', modal: { custom_id: 'x', title: 'x', components: [] } }) },
   ]);
 
-  it('registers player commands globally for the guild and bot DMs', () => {
-    expect(reg.global.map((c) => c.name).sort()).toEqual(['about', 'job', 'jobs', 'leaderboard', 'name', 'notices', 'profile', 'token']);
-    for (const c of reg.global) {
-      expect(c.contexts).toEqual([0, 1]);
-      expect(c.integration_types).toEqual([0]);
-    }
+  it('registers nothing globally, so no command works in DMs', () => {
+    expect(reg.global).toEqual([]);
   });
 
-  it('registers moderator commands only in the guild, hidden by default', () => {
-    expect(reg.guild).toEqual([{ name: 'review', description: 'test', default_member_permissions: '0' }]);
+  it('registers every command per server; moderator commands hidden by default', () => {
+    expect(reg.guild.map((c) => c.name).sort()).toEqual(['about', 'job', 'jobs', 'leaderboard', 'name', 'notices', 'profile', 'review', 'token']);
+    for (const c of reg.guild) {
+      expect('contexts' in c).toBe(false);
+      expect(c.default_member_permissions).toBe(c.name === 'review' ? '0' : undefined);
+    }
   });
 
   it('rejects duplicate names', () => {

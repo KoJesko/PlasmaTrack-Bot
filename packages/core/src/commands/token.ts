@@ -24,7 +24,7 @@ const DISABLED = 'Your PlasmaTrack account is disabled. Ask a moderator.';
 const ephemeral = (message: OutgoingMessage): OutgoingMessage => ({ ...message, flags: MessageFlags.Ephemeral });
 
 export const tokenCommand: CommandDefinition = {
-  access: 'everyone',
+  access: 'member',
   json: {
     name: 'token',
     description: 'Your PlasmaTrack token for the desktop tracker (only you see the replies)',
@@ -61,7 +61,7 @@ export const tokenCommand: CommandDefinition = {
 };
 
 export const nameCommand: CommandDefinition = {
-  access: 'everyone',
+  access: 'member',
   json: {
     name: 'name',
     description: 'Change the name shown for you on PlasmaTrack leaderboards (only you see the reply)',
@@ -82,7 +82,7 @@ export const nameCommand: CommandDefinition = {
 export const tokenComponents: ComponentDefinition[] = [
   {
     prefix: 'tok-new',
-    access: 'everyone',
+    access: 'member',
     handle: ({ interaction }) => ({
       kind: 'defer-update',
       task: { name: TOKEN_NEW_TASK, input: { displayName: defaultDisplayName(invoker(interaction)), confirmed: true } },
@@ -90,12 +90,12 @@ export const tokenComponents: ComponentDefinition[] = [
   },
   {
     prefix: 'tok-revoke',
-    access: 'everyone',
+    access: 'member',
     handle: () => ({ kind: 'defer-update', task: { name: TOKEN_REVOKE_TASK, input: null } }),
   },
   {
     prefix: 'tok-cancel',
-    access: 'everyone',
+    access: 'member',
     handle: () => ({ kind: 'update', message: { content: 'Cancelled. Nothing changed.', components: [] } }),
   },
 ];

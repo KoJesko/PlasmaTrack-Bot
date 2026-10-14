@@ -5,6 +5,7 @@ import type { Env } from '../src/env.ts';
 export const USER_A = '400000000000000004';
 export const USER_B = '500000000000000005';
 export const MOD_ROLE = '300000000000000003';
+export const MEMBER_ROLE = '300000000000000013';
 export const GUILD_ID = '200000000000000002';
 export const INTERACTION_TOKEN = 'aW50ZXJhY3Rpb246dGVzdC10b2tlbg';
 
@@ -23,7 +24,7 @@ export async function signedRequest(body: unknown, opts: { tamper?: boolean; pat
 }
 
 /** A webhook request signed like the PlasmaTrack server signs it (server WEBHOOKS §2). */
-export async function signedWebhook(event: { event_id: string; type: string }, secret = env.PLASMATRACK_WEBHOOK_SECRET) {
+export async function signedWebhook(event: { event_id: string; type: string }, secret = env.PLASMATRACK_WEBHOOK_SECRET_PRODUCTION) {
   const raw = JSON.stringify(event);
   const signature = await signWebhook([secret], new TextEncoder().encode(raw), Date.now() / 1000);
   return new Request('https://bot.test/webhooks/plasmatrack', {
@@ -66,7 +67,7 @@ export function command(name: string, opts: { user?: string; roles?: string[]; d
     data: { id: '700000000000000007', name, type: 1, options: [] },
     ...(opts.dm
       ? { user }
-      : { guild_id: GUILD_ID, member: { user, roles: opts.roles ?? [], permissions: '0', joined_at: '2026-01-01T00:00:00Z', deaf: false, mute: false } }),
+      : { guild_id: GUILD_ID, member: { user, roles: opts.roles ?? [MEMBER_ROLE], permissions: '0', joined_at: '2026-01-01T00:00:00Z', deaf: false, mute: false } }),
   };
 }
 

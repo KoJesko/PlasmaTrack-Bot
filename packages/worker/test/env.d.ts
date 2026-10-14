@@ -6,7 +6,7 @@ declare global {
     interface Env extends WorkerEnv {
       TEST_MIGRATIONS: D1Migration[];
       TEST_SIGNING_PKCS8: string;
-      PLASMATRACK_WEBHOOK_SECRET: string;
+      PLASMATRACK_WEBHOOK_SECRET_PRODUCTION: string;
     }
   }
 }

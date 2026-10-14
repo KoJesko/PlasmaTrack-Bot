@@ -36,7 +36,7 @@ interface JobInput {
 }
 
 export const jobCommand: CommandDefinition = {
-  access: 'everyone',
+  access: 'member',
   json: {
     name: 'job',
     description: 'A job’s details and route map',

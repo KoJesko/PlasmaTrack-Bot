@@ -44,13 +44,31 @@ crons = ["17 3 * * *"]
 [vars]
 DISCORD_APPLICATION_ID = "<application id>"
 DISCORD_PUBLIC_KEY = "<application public key, 64 hex chars>"
-# The PlasmaTrack server id. Comma-separate to add test servers.
-DISCORD_GUILD_ID = "<the PlasmaTrack server id>"
-# Comma-separated role IDs allowed to use moderator commands.
-MODERATOR_ROLE_IDS = "<role id>,<role id>"
 NOTICE_TTL_DAYS = "30"
 RENDERER_URL = "https://<your renderer host>"
-# The PlasmaTrack server (origin only; the bot adds /api/v1). Leave it out until the server
-# exists: commands that need it then say it isn't connected. Set it together with the
-# PLASMATRACK_BOT_TOKEN secret.
-# PLASMATRACK_API_URL = "https://<server host>"
+
+# One table per Discord server. Commands work only in these servers (never in DMs), and
+# every command except /about needs one of the listed roles. With no member_roles, only
+# moderators can use PlasmaTrack in that server.
+[vars.GUILDS."<server id>"]
+backend = "production"
+member_roles = ["<role id>"]
+moderator_roles = ["<role id>"]
+# Channel for review-queue posts; "" for none.
+review_channel = ""
+
+# A test server, kept apart from production data by its own backend.
+# [vars.GUILDS."<test server id>"]
+# backend = "test"
+# member_roles = ["<role id>"]
+# moderator_roles = ["<role id>"]
+# review_channel = "<channel id>"
+
+# PlasmaTrack backends by name (lowercase letters and digits). A backend with api_url needs the
+# secret PLASMATRACK_BOT_TOKEN_<NAME>; webhooks need PLASMATRACK_WEBHOOK_SECRET_<NAME>. Leave
+# api_url out until the server exists: commands then say it isn't connected.
+[vars.BACKENDS.production]
+# api_url = "https://<server host>"
+
+# [vars.BACKENDS.test]
+# demo = true          # built-in made-up data, until a test server exists

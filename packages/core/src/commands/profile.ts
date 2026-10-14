@@ -15,7 +15,7 @@ interface ProfileInput {
 }
 
 export const profileCommand: CommandDefinition = {
-  access: 'everyone',
+  access: 'member',
   json: {
     name: 'profile',
     description: 'A player’s PlasmaTrack stats, per game',

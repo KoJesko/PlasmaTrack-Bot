@@ -40,7 +40,7 @@ describe('HTTP entry point', () => {
 
   it('defers /notices ephemerally and enqueues the task', async () => {
     const { testEnv, sent } = envWithRecordingQueue();
-    const res = await call(await signedRequest(command('notices', { dm: true })), testEnv);
+    const res = await call(await signedRequest(command('notices')), testEnv);
     expect(await res.json()).toEqual({ type: 5, data: { flags: 64 } });
     expect(sent).toEqual([
       expect.objectContaining({
@@ -49,6 +49,15 @@ describe('HTTP entry point', () => {
         interaction: expect.objectContaining({ userId: USER_A, token: INTERACTION_TOKEN }),
       }),
     ]);
+  });
+
+  it('refuses commands in DMs and from members without a PlasmaTrack role', async () => {
+    const { testEnv, sent } = envWithRecordingQueue();
+    const dm = (await (await call(await signedRequest(command('notices', { dm: true })), testEnv)).json()) as { data: { content: string } };
+    expect(dm.data.content).toContain('only work in its Discord servers');
+    const noRole = (await (await call(await signedRequest(command('notices', { roles: [] })), testEnv)).json()) as { data: { content: string } };
+    expect(noRole.data.content).toContain('isn’t open to your roles');
+    expect(sent).toEqual([]);
   });
 
   it('fails closed with a generic message when configuration is invalid', async () => {
@@ -82,7 +91,7 @@ describe('webhook endpoint', () => {
 
   it('answers 503 while no webhook secret is configured', async () => {
     const { testEnv } = envWithRecordingQueue();
-    const res = await call(await signedWebhook(notificationEvent('evt_http_3')), { ...testEnv, PLASMATRACK_WEBHOOK_SECRET: undefined });
+    const res = await call(await signedWebhook(notificationEvent('evt_http_3')), { ...testEnv, PLASMATRACK_WEBHOOK_SECRET_PRODUCTION: undefined });
     expect(res.status).toBe(503);
   });
 

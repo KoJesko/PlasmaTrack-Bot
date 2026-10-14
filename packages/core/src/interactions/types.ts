@@ -14,7 +14,14 @@ import type { Clock, NoticeKind, NoticeStore } from '../ports.ts';
 import type { TruckersMpLookup } from '../truckersmp/client.ts';
 import type { WebhookEnvelope } from '../webhooks/events.ts';
 
-export type Access = 'everyone' | 'moderator';
+/**
+ * Who may use a handler (owner's decision, 2026-10-14: every PlasmaTrack
+ * command needs a role):
+ * - public: anyone, anywhere (only /about);
+ * - member: in a configured server, with one of its member or moderator roles;
+ * - moderator: in a configured server, with one of its moderator roles.
+ */
+export type Access = 'public' | 'member' | 'moderator';
 
 /**
  * What a handler may answer with. Handlers are synchronous and get no I/O
@@ -86,10 +93,11 @@ export type QueueMessage =
   | { type: 'interaction-task'; task: TaskRequest; interaction: InteractionRef; noticeHint: boolean }
   | { type: 'notice-hint'; interaction: InteractionRef }
   /** A verified server webhook; `chunk` numbers the parts of a split recipient list. */
-  | { type: 'webhook'; event: WebhookEnvelope; chunk: number }
+  | { type: 'webhook'; backend: string; event: WebhookEnvelope; chunk: number }
   /** One DM to one player (fan-out of a webhook). `key` deduplicates it. */
   | {
       type: 'player-dm';
+      backend: string;
       key: string;
       userId: string;
       message: OutgoingMessage;
@@ -114,8 +122,13 @@ export interface TaskDeps {
   clock: Clock;
   logger: Logger;
   renderer: ImageRenderer;
-  /** The PlasmaTrack server, or null until it is configured (PLASMATRACK_API_URL). */
+  /**
+   * The PlasmaTrack backend of the server the interaction came from, or null
+   * when that backend isn't connected yet. Resolved per interaction.
+   */
   api: PlasmaTrackApi | null;
+  /** That backend's name (scopes notices); null outside a configured server. */
+  backend: string | null;
   /** Confirms reported TruckersMP accounts against TruckersMP's public API. */
   truckersmp: TruckersMpLookup;
 }

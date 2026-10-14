@@ -44,14 +44,14 @@ type WebhookMessage = Extract<QueueMessage, { type: 'webhook' }>;
 type PlayerDmMessage = Extract<QueueMessage, { type: 'player-dm' }>;
 
 export async function processWebhookEvent(msg: WebhookMessage, deps: EventDeps): Promise<ProcessResult> {
-  const { event } = msg;
-  const key = `evt:${event.event_id}:${msg.chunk}`;
+  const { event, backend } = msg;
+  const key = `evt:${backend}:${event.event_id}:${msg.chunk}`;
   if (!(await deps.dedupe.claim(key, EVENT_DEDUPE_TTL_S))) {
     deps.logger.info('duplicate webhook ignored', { type: event.type, eventId: event.event_id });
     return { status: 'done' };
   }
   try {
-    await handleEvent(event, deps);
+    await handleEvent(backend, event, deps);
     return { status: 'done' };
   } catch (err) {
     await deps.dedupe.release(key);
@@ -59,23 +59,23 @@ export async function processWebhookEvent(msg: WebhookMessage, deps: EventDeps):
   }
 }
 
-async function handleEvent(event: WebhookEnvelope, deps: EventDeps): Promise<void> {
-  const log = { type: event.type, eventId: event.event_id };
+async function handleEvent(backend: string, event: WebhookEnvelope, deps: EventDeps): Promise<void> {
+  const log = { backend, type: event.type, eventId: event.event_id };
   switch (event.type) {
     case 'player.notification': {
       const n = parse(playerNotificationSchema, event, deps.logger);
       if (!n) return;
-      await deliverDm(n.recipient.discord_user_id, notificationDm(n), `${event.event_id}`, deps);
+      await deliverDm(backend, n.recipient.discord_user_id, notificationDm(n), event.event_id, deps);
       return;
     }
     case 'version.revocation_scheduled': {
       const r = parse(revocationScheduledSchema, event, deps.logger);
-      if (r) await fanOut(`${r.revocation_id}:scheduled`, r.recipients, revocationDm(r), deps, { ...log, part: r.part });
+      if (r) await fanOut(backend, `${r.revocation_id}:scheduled`, r.recipients, revocationDm(r), deps, { ...log, part: r.part });
       return;
     }
     case 'version.revocation_cancelled': {
       const r = parse(revocationCancelledSchema, event, deps.logger);
-      if (r) await fanOut(`${r.revocation_id}:cancelled`, r.recipients, revocationCancelledDm(r), deps, { ...log, part: r.part });
+      if (r) await fanOut(backend, `${r.revocation_id}:cancelled`, r.recipients, revocationCancelledDm(r), deps, { ...log, part: r.part });
       return;
     }
     case 'job.needs_review':
@@ -89,7 +89,7 @@ async function handleEvent(event: WebhookEnvelope, deps: EventDeps): Promise<voi
       // version is recorded so ordering already works when that lands. Note
       // for stage 5: advance only after the Discord update succeeded, or a
       // retry would be skipped as stale.
-      const fresh = await deps.jobVersions.advance(job.job_id, job.job_version);
+      const fresh = await deps.jobVersions.advance(`${backend}:${job.job_id}`, job.job_version);
       deps.logger.info(fresh ? 'job event received' : 'stale job event ignored', {
         ...log,
         jobId: job.job_id,
@@ -113,6 +113,7 @@ async function handleEvent(event: WebhookEnvelope, deps: EventDeps): Promise<voi
  * closed DM inbox doesn't hold up the rest.
  */
 async function fanOut(
+  backend: string,
   keyPrefix: string,
   recipients: readonly string[],
   content: DmContent,
@@ -121,16 +122,16 @@ async function fanOut(
 ): Promise<void> {
   const unique = [...new Set(recipients)];
   await deps.queue.sendBatch(
-    unique.map((userId) => ({ type: 'player-dm' as const, key: `${keyPrefix}:${userId}`, userId, ...content })),
+    unique.map((userId) => ({ type: 'player-dm' as const, backend, key: `${keyPrefix}:${userId}`, userId, ...content })),
   );
   deps.logger.info('DMs queued', { ...log, recipients: unique.length });
 }
 
 export async function processPlayerDm(msg: PlayerDmMessage, deps: EventDeps): Promise<ProcessResult> {
-  const key = `dm:${msg.key}`;
+  const key = `dm:${msg.backend}:${msg.key}`;
   if (!(await deps.dedupe.claim(key, EVENT_DEDUPE_TTL_S))) return { status: 'done' };
   try {
-    await deliverDm(msg.userId, { message: msg.message, notice: msg.notice }, msg.key, deps);
+    await deliverDm(msg.backend, msg.userId, { message: msg.message, notice: msg.notice }, msg.key, deps);
     return { status: 'done' };
   } catch (err) {
     await deps.dedupe.release(key);
@@ -145,7 +146,13 @@ export type DmOutcome = 'dm' | 'notice' | 'dropped';
  * the text is kept for `/notices` instead: only that user can ever read it,
  * and only ephemerally. Retryable Discord failures are thrown.
  */
-export async function deliverDm(userId: string, content: DmContent, noticeId: string, deps: EventDeps): Promise<DmOutcome> {
+export async function deliverDm(
+  backend: string,
+  userId: string,
+  content: DmContent,
+  noticeId: string,
+  deps: EventDeps,
+): Promise<DmOutcome> {
   try {
     await deps.discord.sendDirectMessage(userId, { ...content.message, allowed_mentions: { parse: [] } });
     return 'dm';
@@ -157,7 +164,9 @@ export async function deliverDm(userId: string, content: DmContent, noticeId: st
     }
     const now = deps.clock.now();
     await deps.notices.add(userId, {
-      id: noticeId,
+      // Prefixed: IDs from different backends must never collide.
+      id: `${backend}:${noticeId}`,
+      backend,
       kind: content.notice.kind,
       text: content.notice.text,
       createdAt: now,

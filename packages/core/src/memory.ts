@@ -116,12 +116,12 @@ export class MemoryNoticeStore implements NoticeStore {
     this.byUser.set(discordUserId, list);
   }
 
-  async countUnread(discordUserId: string): Promise<number> {
-    return this.unread(discordUserId).length;
+  async countUnread(discordUserId: string, backend: string): Promise<number> {
+    return this.unread(discordUserId, backend).length;
   }
 
-  async listUnread(discordUserId: string, limit: number): Promise<Notice[]> {
-    return this.unread(discordUserId)
+  async listUnread(discordUserId: string, backend: string, limit: number): Promise<Notice[]> {
+    return this.unread(discordUserId, backend)
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, limit);
   }
@@ -143,10 +143,10 @@ export class MemoryNoticeStore implements NoticeStore {
     return n;
   }
 
-  private unread(discordUserId: string): Notice[] {
+  private unread(discordUserId: string, backend: string): Notice[] {
     const now = this.clock.now();
     return (this.byUser.get(discordUserId) ?? [])
-      .filter((e) => !e.read && e.notice.expiresAt > now)
+      .filter((e) => !e.read && e.notice.expiresAt > now && e.notice.backend === backend)
       .map((e) => e.notice);
   }
 }

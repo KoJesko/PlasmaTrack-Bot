@@ -70,7 +70,7 @@ async function signed(event: unknown, clock: FakeClock, secrets = [SECRET]) {
   return { body, signature: await signWebhook(secrets, body, clock.now() / 1000), eventIdHeader: (event as { event_id: string }).event_id };
 }
 
-function receiver(clock = new FakeClock(), secrets = [SECRET]) {
+function receiver(clock = new FakeClock(), secrets: Record<string, string[]> = { production: [SECRET] }) {
   const queue = new MemoryWorkQueue<QueueMessage>();
   const { logger, lines } = captureLogger();
   return { queue, lines, deps: { secrets, queue, logger, clock }, clock };
@@ -114,11 +114,11 @@ describe('receiveWebhook', () => {
     const r = receiver();
     const res = await receiveWebhook(await signed(notification(), r.clock), r.deps);
     expect(res.status).toBe(202);
-    expect(r.queue.take()).toEqual([{ type: 'webhook', event: notification(), chunk: 0 }]);
+    expect(r.queue.take()).toEqual([{ type: 'webhook', backend: 'production', event: notification(), chunk: 0 }]);
   });
 
   it('answers 503 when no secret is configured, so the server retries later', async () => {
-    const r = receiver(new FakeClock(), []);
+    const r = receiver(new FakeClock(), {});
     expect((await receiveWebhook(await signed(notification(), r.clock), r.deps)).status).toBe(503);
   });
 
@@ -152,6 +152,13 @@ describe('receiveWebhook', () => {
     expect(queued.every((m) => JSON.stringify(m).length < 120_000)).toBe(true);
   });
 
+  it('tells backends apart by the secret that verifies', async () => {
+    const r = receiver(new FakeClock(), { production: [SECRET], test: [NEW_SECRET] });
+    await receiveWebhook(await signed(notification(), r.clock, [NEW_SECRET]), r.deps);
+    await receiveWebhook(await signed(notification(), r.clock, [SECRET]), r.deps);
+    expect(r.queue.take().map((m) => m.type === 'webhook' && m.backend)).toEqual(['test', 'production']);
+  });
+
   it('answers 503 if the queue is down, so the server retries', async () => {
     const r = receiver();
     r.queue.sendBatch = async () => {
@@ -162,7 +169,12 @@ describe('receiveWebhook', () => {
 });
 
 describe('webhook processing', () => {
-  const webhook = (event: ReturnType<typeof envelope>, chunk = 0): QueueMessage => ({ type: 'webhook', event, chunk });
+  const webhook = (event: ReturnType<typeof envelope>, chunk = 0, backend = 'production'): QueueMessage => ({
+    type: 'webhook',
+    backend,
+    event,
+    chunk,
+  });
 
   it('DMs a player notification immediately', async () => {
     const { deps, discord } = taskDeps();
@@ -185,12 +197,14 @@ describe('webhook processing', () => {
     const { deps, discord, notices } = taskDeps();
     discord.dmFailures.set(PLAYER, new DiscordApiError(403, 50007, undefined, 'Cannot send messages to this user'));
     expect(await processQueueMessage(webhook(notification()), [], deps)).toEqual({ status: 'done' });
-    const stored = await notices.listUnread(PLAYER, 10);
+    const stored = await notices.listUnread(PLAYER, 'production', 10);
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({ kind: 'speed_penalty' });
     expect(stored[0]!.text).toContain('Speed penalty');
     // Never visible to anyone else.
-    expect(await notices.countUnread(PLAYER_2)).toBe(0);
+    expect(await notices.countUnread(PLAYER_2, 'production')).toBe(0);
+    // Nor in another backend's /notices.
+    expect(await notices.countUnread(PLAYER, 'test')).toBe(0);
   });
 
   it('retries when Discord is rate limiting, and does not count the attempt as done', async () => {
@@ -220,6 +234,13 @@ describe('webhook processing', () => {
     for (const m of queue.take()) await processQueueMessage(m, [], deps);
     const embed = (discord.calls[0]!.message as { embeds: { title: string }[] }).embeds[0]!;
     expect(embed.title).toBe('No update needed: PlasmaTrack 0.1.0 (Windows)');
+  });
+
+  it('keeps backends apart: the same event ID from each is handled once per backend', async () => {
+    const { deps, discord } = taskDeps();
+    await processQueueMessage(webhook(notification(), 0, 'production'), [], deps);
+    await processQueueMessage(webhook(notification(), 0, 'test'), [], deps);
+    expect(discord.calls.filter((c) => c.op === 'dm')).toHaveLength(2);
   });
 
   it('ignores a job event older than one already handled', async () => {

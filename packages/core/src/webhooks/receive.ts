@@ -18,8 +18,11 @@ export interface WebhookRequest {
 }
 
 export interface WebhookReceiveDeps {
-  /** Accepted signing secrets; empty means webhooks are not configured. */
-  secrets: readonly string[];
+  /**
+   * Signing secrets per backend. Each backend has its own, so the secret that
+   * verifies tells which backend sent the event. Empty: not configured.
+   */
+  secrets: Readonly<Record<string, readonly string[]>>;
   queue: WorkQueue<QueueMessage>;
   logger: Logger;
   clock: Clock;
@@ -31,11 +34,18 @@ export interface WebhookResponse {
 }
 
 export async function receiveWebhook(req: WebhookRequest, deps: WebhookReceiveDeps): Promise<WebhookResponse> {
-  if (deps.secrets.length === 0) return { status: 503, body: 'webhooks are not configured' };
+  const configured = Object.entries(deps.secrets).filter(([, s]) => s.length > 0);
+  if (configured.length === 0) return { status: 503, body: 'webhooks are not configured' };
   if (req.body.length > WEBHOOK_MAX_BYTES) return { status: 413, body: 'payload too large' };
 
-  const valid = await verifyWebhookSignature(deps.secrets, req.signature, req.body, deps.clock.now() / 1000);
-  if (!valid) return { status: 401, body: 'invalid signature' };
+  let backend: string | undefined;
+  for (const [name, secrets] of configured) {
+    if (await verifyWebhookSignature(secrets, req.signature, req.body, deps.clock.now() / 1000)) {
+      backend = name;
+      break;
+    }
+  }
+  if (!backend) return { status: 401, body: 'invalid signature' };
 
   let json: unknown;
   try {
@@ -53,6 +63,7 @@ export async function receiveWebhook(req: WebhookRequest, deps: WebhookReceiveDe
   if (event.payload_version !== SUPPORTED_PAYLOAD_VERSION) {
     // Retrying won't help until the bot is updated; take it so the server stops retrying.
     deps.logger.error('webhook with unsupported payload_version ignored', {
+      backend,
       type: event.type,
       eventId: event.event_id,
       payloadVersion: event.payload_version,
@@ -61,7 +72,7 @@ export async function receiveWebhook(req: WebhookRequest, deps: WebhookReceiveDe
   }
 
   try {
-    await deps.queue.sendBatch(split(event).map((e, chunk) => ({ type: 'webhook', event: e, chunk })));
+    await deps.queue.sendBatch(split(event).map((e, chunk) => ({ type: 'webhook', backend: backend!, event: e, chunk })));
   } catch (err) {
     // The server retries on any non-2xx.
     deps.logger.error('could not queue webhook', { type: event.type, eventId: event.event_id, err });

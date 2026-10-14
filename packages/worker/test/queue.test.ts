@@ -3,13 +3,13 @@ import type { QueueMessage } from '@plasmatrack/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { D1NoticeStore } from '../src/adapters.ts';
 import worker from '../src/index.ts';
-import { INTERACTION_TOKEN, notificationEvent, USER_A, USER_B } from './helpers.ts';
+import { GUILD_ID, INTERACTION_TOKEN, notificationEvent, USER_A, USER_B } from './helpers.ts';
 
 function taskMessage(name: string, userId = USER_A): QueueMessage {
   return {
     type: 'interaction-task',
     task: { name, input: null },
-    interaction: { id: '1', applicationId: '100000000000000001', token: INTERACTION_TOKEN, userId, receivedAt: Date.now() },
+    interaction: { id: '1', applicationId: '100000000000000001', token: INTERACTION_TOKEN, userId, guildId: GUILD_ID, receivedAt: Date.now() },
     noticeHint: true,
   };
 }
@@ -33,8 +33,8 @@ describe('queue consumer', () => {
   it('runs /notices: edits the deferred reply ephemerally and marks only that user’s notices read', async () => {
     const store = new D1NoticeStore(env.DB);
     const now = Date.now();
-    await store.add(USER_A, { id: 'n1', kind: 'speed_penalty', text: 'Speed penalty activated on job 7', createdAt: now, expiresAt: now + 60_000 });
-    await store.add(USER_B, { id: 'n1', kind: 'invalid_delivery', text: 'B only', createdAt: now, expiresAt: now + 60_000 });
+    await store.add(USER_A, { id: 'n1', backend: 'production', kind: 'speed_penalty', text: 'Speed penalty activated on job 7', createdAt: now, expiresAt: now + 60_000 });
+    await store.add(USER_B, { id: 'n1', backend: 'production', kind: 'invalid_delivery', text: 'B only', createdAt: now, expiresAt: now + 60_000 });
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ id: 'msg' }));
     const { result } = await runBatch([taskMessage('notices.list')]);
@@ -47,8 +47,8 @@ describe('queue consumer', () => {
     expect(body.flags & 64).toBe(64);
     expect(JSON.stringify(body)).toContain('Speed penalty activated on job 7');
     expect(JSON.stringify(body)).not.toContain('B only');
-    expect(await store.countUnread(USER_A)).toBe(0);
-    expect(await store.countUnread(USER_B)).toBe(1);
+    expect(await store.countUnread(USER_A, 'production')).toBe(0);
+    expect(await store.countUnread(USER_B, 'production')).toBe(1);
   });
 
   it('retries a message when Discord rate-limits, using its retry_after', async () => {
@@ -63,7 +63,7 @@ describe('queue consumer', () => {
 });
 
 describe('queue consumer: webhooks', () => {
-  const webhook = (eventId: string, user = USER_A): QueueMessage => ({ type: 'webhook', event: notificationEvent(eventId, user), chunk: 0 });
+  const webhook = (eventId: string, user = USER_A): QueueMessage => ({ type: 'webhook', backend: 'production', event: notificationEvent(eventId, user), chunk: 0 });
 
   it('DMs a player notification, once even if redelivered', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
@@ -85,7 +85,7 @@ describe('queue consumer: webhooks', () => {
     );
     const { result } = await runBatch([webhook('evt_q_2', USER_B)]);
     expect(result.explicitAcks).toEqual(['m0']);
-    const notices = await new D1NoticeStore(env.DB).listUnread(USER_B, 10);
+    const notices = await new D1NoticeStore(env.DB).listUnread(USER_B, 'production', 10);
     expect(notices.map((n) => n.kind)).toContain('invalid_delivery');
   });
 });

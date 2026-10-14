@@ -29,7 +29,7 @@ interface JobsInput {
 }
 
 export const jobsCommand: CommandDefinition = {
-  access: 'everyone',
+  access: 'member',
   json: {
     name: 'jobs',
     description: 'A player’s recent jobs in one game',
@@ -51,7 +51,7 @@ export const jobsCommand: CommandDefinition = {
 // custom_id: "jobs:{game}:{discord id}:{p|-}:{cursor}" (≤ 100 characters)
 export const jobsComponent: ComponentDefinition = {
   prefix: 'jobs',
-  access: 'everyone',
+  access: 'member',
   handle: (_ctx, arg) => {
     const [game, target, vis, ...rest] = arg.split(':');
     const cursor = rest.join(':');
@@ -104,7 +104,7 @@ interface LeaderboardInput {
 }
 
 export const leaderboardCommand: CommandDefinition = {
-  access: 'everyone',
+  access: 'member',
   json: {
     name: 'leaderboard',
     description: 'Rankings for one game (all-time, month or week, in UTC)',
@@ -166,7 +166,7 @@ export const leaderboardCommand: CommandDefinition = {
 // custom_id: "lb:{game}:{a|m|w}:{at|-}:{a|s}:{p|-}:{cursor}" (≤ 100 characters)
 export const leaderboardComponent: ComponentDefinition = {
   prefix: 'lb',
-  access: 'everyone',
+  access: 'member',
   handle: (_ctx, arg) => {
     const [game, p, at, d, vis, ...rest] = arg.split(':');
     const cursor = rest.join(':');

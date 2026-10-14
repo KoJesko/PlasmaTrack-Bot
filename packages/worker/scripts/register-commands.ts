@@ -3,7 +3,8 @@
 //   npm run register-commands -w @plasmatrack/worker             # register
 //   npm run register-commands -w @plasmatrack/worker -- --dry-run # print only
 //
-// Reads DISCORD_APPLICATION_ID, DISCORD_GUILD_ID and DISCORD_BOT_TOKEN from the
+// Reads DISCORD_APPLICATION_ID, DISCORD_GUILD_ID (comma-separated: every server in
+// GUILDS) and DISCORD_BOT_TOKEN from the
 // environment, falling back to packages/worker/.dev.vars. The token is never printed.
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -52,12 +53,13 @@ async function put(path: string, body: unknown, label: string): Promise<void> {
   console.log(`${label}: ${names.length} command(s): ${names.join(', ') || '(none)'}`);
 }
 
-await put(`/applications/${appId}/commands`, registration.global, 'global (guild + DMs)');
+// Every command is per server; this clears any global (DM) commands from earlier versions.
+await put(`/applications/${appId}/commands`, registration.global, 'global (cleared)');
 let failed = false;
 for (const guildId of guildIds) {
   // One guild failing (e.g. bot not invited yet) shouldn't stop the others.
   try {
-    await put(`/applications/${appId}/guilds/${guildId}/commands`, registration.guild, `guild ${guildId} (moderators)`);
+    await put(`/applications/${appId}/guilds/${guildId}/commands`, registration.guild, `guild ${guildId}`);
   } catch {
     failed = true;
   }

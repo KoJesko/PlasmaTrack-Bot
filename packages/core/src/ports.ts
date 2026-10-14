@@ -51,6 +51,8 @@ export type NoticeKind = 'invalid_delivery' | 'speed_penalty' | 'revocation_sche
 
 export interface Notice {
   id: string;
+  /** The PlasmaTrack backend it came from; /notices in a server shows only that server's backend. */
+  backend: string;
   kind: NoticeKind;
   text: string;
   createdAt: number;
@@ -64,9 +66,9 @@ export interface Notice {
  */
 export interface NoticeStore {
   add(discordUserId: string, notice: Notice): Promise<void>;
-  countUnread(discordUserId: string): Promise<number>;
+  countUnread(discordUserId: string, backend: string): Promise<number>;
   /** Newest first, unread and unexpired only. */
-  listUnread(discordUserId: string, limit: number): Promise<Notice[]>;
+  listUnread(discordUserId: string, backend: string, limit: number): Promise<Notice[]>;
   markRead(discordUserId: string, ids: string[]): Promise<void>;
   purgeExpired(): Promise<number>;
 }

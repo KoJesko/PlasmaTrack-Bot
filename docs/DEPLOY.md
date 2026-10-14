@@ -55,36 +55,51 @@ exists. Then:
     npx wrangler secret put RENDERER_KEY
     npx wrangler deploy
 
-### Connecting the PlasmaTrack server
+### Discord servers, roles and backends
 
-Do this once the server is deployed. Until then, leave these out; the bot works without them.
+Each Discord server the bot serves has a `[vars.GUILDS.<server id>]` table in `wrangler.toml`
+(see the sample):
+- **backend:** the PlasmaTrack server that Discord server uses. A test Discord server gets its
+  own backend, so it never sees production data.
+- **member_roles:** who can use player commands. Every command except `/about` needs a role,
+  and nothing works in DMs. With no member roles, only moderators can use it there.
+- **moderator_roles:** who can use moderator commands.
+- **review_channel:** where review-queue posts go (`""` for none).
 
-1. **API:** set `PLASMATRACK_API_URL` in `wrangler.toml` (the server's origin, e.g.
-   `https://plasmatrack-server.<account>.workers.dev`), then:
+### Connecting a PlasmaTrack server
 
-       npx wrangler secret put PLASMATRACK_BOT_TOKEN
+Do this for each backend once its server is deployed. Until then, leave it without
+`api_url`; commands say the server isn't connected. A test backend can use `demo = true`
+(made-up data in memory) in the meantime. Below, `<NAME>` is the backend's name in capitals,
+e.g. `PRODUCTION` or `TEST`.
+
+1. **API:** set `api_url` in that backend's `[vars.BACKENDS.<name>]` table (the server's origin,
+   e.g. `https://plasmatrack-server.<account>.workers.dev`), then:
+
+       npx wrangler secret put PLASMATRACK_BOT_TOKEN_<NAME>
 
    The server's separate read-only token isn't used.
 2. **Webhooks:**
-   1. Generate a secret:
+   1. Generate a secret. Every backend needs a different one, because the secret tells the
+      bot which server sent an event:
 
           node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
    2. Store it on the bot:
 
-          npx wrangler secret put PLASMATRACK_WEBHOOK_SECRET
+          npx wrangler secret put PLASMATRACK_WEBHOOK_SECRET_<NAME>
 
-   3. In the server's settings, set the same secret and the webhook URL
-      `https://<this worker>/webhooks/plasmatrack`.
+   3. In that server's settings, set the same secret and the webhook URL
+      `https://<this worker>/webhooks/plasmatrack` (the same URL for every backend).
    4. **To rotate:** put both secrets on each side, comma-separated on the bot. Once the
       server signs with the new one, remove the old one from both.
-3. **Migrations:** apply them (`0002` adds the table used to order webhook events):
+3. **Migrations:** apply them (`0002` orders webhook events; `0003` keeps notices per backend):
 
        npx wrangler d1 migrations apply plasmatrack-bot --remote
 
-4. **Admins:** every moderator who uses moderator commands must also be an admin on the
-   server, which makes the final call (server API_CONVENTIONS §2). Add the first admin on the
-   server host with `plasmatrack-server admin add <discord id>`.
+4. **Admins:** every moderator who uses moderator commands must also be an admin on that
+   backend's server, which makes the final call (server API_CONVENTIONS §2). The server's
+   setup adds the first admins; `/admins add` adds more.
 
 The Worker validates its configuration on every request. If anything is missing or still a
 placeholder, it answers 500 and logs the names of the bad keys (never their values). Watch
@@ -100,10 +115,13 @@ the logs with `npx wrangler tail`.
 
 1. In the developer portal, set **Interactions Endpoint URL** to
    `https://<your-worker-host>/interactions`. Discord verifies it with a signed PING when you save.
-2. Register the commands, from the repo root: `npm run register-commands -w @plasmatrack/worker`.
+2. Register the commands in every Discord server from `GUILDS` (comma-separated). From the repo
+   root: `DISCORD_GUILD_ID=<id>,<id> npm run register-commands -w @plasmatrack/worker`. The bot
+   must already be in each server.
 3. Moderator commands are hidden from everyone except server admins by default. To let
    moderators use them, go to **Server Settings → Integrations → PlasmaTrack** and allow the
-   moderator role. The bot independently re-checks `MODERATOR_ROLE_IDS` on every use.
+   moderator roles. You can hide the player commands from other roles there too. Either way,
+   the bot checks each server's roles on every use.
 
 ## Updating
 

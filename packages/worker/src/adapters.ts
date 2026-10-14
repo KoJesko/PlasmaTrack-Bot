@@ -96,6 +96,7 @@ export class D1JobVersionStore implements JobVersionStore {
 
 interface NoticeRow {
   id: string;
+  backend: string;
   kind: string;
   text: string;
   created_at: number;
@@ -114,35 +115,36 @@ export class D1NoticeStore implements NoticeStore {
   async add(discordUserId: string, notice: Notice): Promise<void> {
     await this.db
       .prepare(
-        `INSERT OR IGNORE INTO notices (discord_user_id, id, kind, text, created_at, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+        `INSERT OR IGNORE INTO notices (discord_user_id, id, backend, kind, text, created_at, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
       )
-      .bind(discordUserId, notice.id, notice.kind, notice.text, notice.createdAt, notice.expiresAt)
+      .bind(discordUserId, notice.id, notice.backend, notice.kind, notice.text, notice.createdAt, notice.expiresAt)
       .run();
   }
 
-  async countUnread(discordUserId: string): Promise<number> {
+  async countUnread(discordUserId: string, backend: string): Promise<number> {
     const row = await this.db
       .prepare(
         `SELECT COUNT(*) AS n FROM notices
-         WHERE discord_user_id = ?1 AND read_at IS NULL AND expires_at > ?2`,
+         WHERE discord_user_id = ?1 AND backend = ?3 AND read_at IS NULL AND expires_at > ?2`,
       )
-      .bind(discordUserId, this.clock.now())
+      .bind(discordUserId, this.clock.now(), backend)
       .first<{ n: number }>();
     return row?.n ?? 0;
   }
 
-  async listUnread(discordUserId: string, limit: number): Promise<Notice[]> {
+  async listUnread(discordUserId: string, backend: string, limit: number): Promise<Notice[]> {
     const { results } = await this.db
       .prepare(
-        `SELECT id, kind, text, created_at, expires_at FROM notices
-         WHERE discord_user_id = ?1 AND read_at IS NULL AND expires_at > ?2
+        `SELECT id, backend, kind, text, created_at, expires_at FROM notices
+         WHERE discord_user_id = ?1 AND backend = ?4 AND read_at IS NULL AND expires_at > ?2
          ORDER BY created_at DESC LIMIT ?3`,
       )
-      .bind(discordUserId, this.clock.now(), limit)
+      .bind(discordUserId, this.clock.now(), limit, backend)
       .all<NoticeRow>();
     return results.map((r) => ({
       id: r.id,
+      backend: r.backend,
       kind: r.kind as NoticeKind,
       text: r.text,
       createdAt: r.created_at,

@@ -46,8 +46,9 @@ describe('D1JobVersionStore', () => {
 });
 
 describe('D1NoticeStore', () => {
-  const notice = (id: string, createdAt: number, text = id) => ({
+  const notice = (id: string, createdAt: number, text = id, backend = 'production') => ({
     id,
+    backend,
     kind: 'invalid_delivery' as const,
     text,
     createdAt,
@@ -62,14 +63,19 @@ describe('D1NoticeStore', () => {
     await store.add(USER_A, notice('n2', clock.t - 1000));
     await store.add(USER_B, notice('n1', clock.t - 2000, 'belongs to B'));
 
-    expect(await store.countUnread(USER_A)).toBe(2);
-    expect((await store.listUnread(USER_A, 10)).map((n) => n.id)).toEqual(['n2', 'n1']);
-    expect((await store.listUnread(USER_B, 10)).map((n) => n.text)).toEqual(['belongs to B']);
+    expect(await store.countUnread(USER_A, 'production')).toBe(2);
+    expect((await store.listUnread(USER_A, 'production', 10)).map((n) => n.id)).toEqual(['n2', 'n1']);
+    expect((await store.listUnread(USER_B, 'production', 10)).map((n) => n.text)).toEqual(['belongs to B']);
+
+    // Another backend's notices are not listed here.
+    await store.add(USER_A, notice('t1', clock.t, 'from the test backend', 'test'));
+    expect((await store.listUnread(USER_A, 'production', 10)).map((n) => n.id)).toEqual(['n2', 'n1']);
+    expect((await store.listUnread(USER_A, 'test', 10)).map((n) => n.id)).toEqual(['t1']);
 
     // Marking read is scoped to the user: B's "n1" is untouched.
     await store.markRead(USER_A, ['n1', 'n2']);
-    expect(await store.countUnread(USER_A)).toBe(0);
-    expect(await store.countUnread(USER_B)).toBe(1);
+    expect(await store.countUnread(USER_A, 'production')).toBe(0);
+    expect(await store.countUnread(USER_B, 'production')).toBe(1);
   });
 
   it('hides and purges expired notices', async () => {
@@ -77,11 +83,11 @@ describe('D1NoticeStore', () => {
     const store = new D1NoticeStore(env.DB, clock);
     await store.add(USER_A, notice('old', clock.t));
     clock.t += 3_600_001;
-    expect(await store.countUnread(USER_A)).toBe(0);
+    expect(await store.countUnread(USER_A, 'production')).toBe(0);
     // Storage is shared across this file's tests, so other expired rows may go too.
     expect(await store.purgeExpired()).toBeGreaterThanOrEqual(1);
     clock.t -= 3_600_001;
-    expect(await store.countUnread(USER_A)).toBe(0);
+    expect(await store.countUnread(USER_A, 'production')).toBe(0);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   InteractionType,
   MessageFlags,
 } from '../discord/constants.ts';
+import type { GuildSettings } from '../config.ts';
 import type { Logger } from '../log.ts';
 import type { Clock, WorkQueue } from '../ports.ts';
 import type { OutgoingMessage } from '../discord/rest.ts';
@@ -23,9 +24,8 @@ import type {
 export interface RouterDeps {
   handlers: InteractionHandlers;
   applicationId: string;
-  /** Guilds where moderator commands are allowed. */
-  guildIds: readonly string[];
-  moderatorRoleIds: readonly string[];
+  /** Per Discord server: roles and backend. Commands outside these servers are refused. */
+  guilds: Readonly<Record<string, GuildSettings>>;
   queue: WorkQueue<QueueMessage>;
   logger: Logger;
   clock: Clock;
@@ -39,7 +39,9 @@ export interface RouterResult {
   background: QueueMessage[];
 }
 
-export const NOT_ALLOWED = 'You need a moderator role in the PlasmaTrack server to use this.';
+export const NOT_ALLOWED = 'You need a moderator role to use this.';
+export const NOT_MEMBER = 'PlasmaTrack isn’t open to your roles here. Ask a moderator if you think you should have access.';
+export const NOT_HERE = 'PlasmaTrack commands only work in its Discord servers.';
 export const START_FAILED = 'Sorry, that could not be started. Please try again in a moment.';
 
 export async function handleInteraction(interaction: APIInteraction, deps: RouterDeps): Promise<RouterResult> {
@@ -95,8 +97,11 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
     return reply(ephemeralText('Unsupported interaction.'));
   }
 
-  if (access === 'moderator' && !isModerator(interaction, deps)) {
-    return reply(ephemeralText(NOT_ALLOWED));
+  if (access !== 'public') {
+    const guild = interaction.guild_id ? deps.guilds[interaction.guild_id] : undefined;
+    if (!guild || !interaction.member) return reply(ephemeralText(NOT_HERE));
+    if (access === 'moderator' && !isModerator(interaction, guild)) return reply(ephemeralText(NOT_ALLOWED));
+    if (access === 'member' && !isMember(interaction, guild)) return reply(ephemeralText(NOT_MEMBER));
   }
 
   let result: HandlerResult;
@@ -107,7 +112,9 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
     return reply(ephemeralText('Something went wrong handling that.'));
   }
 
-  const hint: QueueMessage[] = isCommand ? [{ type: 'notice-hint', interaction: ref }] : [];
+  // Notices belong to a server's backend, so the hint only makes sense inside a configured server.
+  const inGuild = !!(interaction.guild_id && deps.guilds[interaction.guild_id]);
+  const hint: QueueMessage[] = isCommand && inGuild ? [{ type: 'notice-hint', interaction: ref }] : [];
 
   switch (result.kind) {
     case 'reply':
@@ -130,7 +137,7 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
       };
     case 'defer':
     case 'defer-update': {
-      const message: QueueMessage = { type: 'interaction-task', task: result.task, interaction: ref, noticeHint: isCommand };
+      const message: QueueMessage = { type: 'interaction-task', task: result.task, interaction: ref, noticeHint: isCommand && inGuild };
       try {
         await withTimeout(deps.queue.send(message), deps.enqueueTimeoutMs ?? 2000);
       } catch (err) {
@@ -149,18 +156,14 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
   }
 }
 
-/**
- * Moderator commands are registered only in the configured guild(s), and are
- * also refused here unless used inside one of them by a member holding a
- * moderator role. `member.roles` only exists for interactions in a guild.
- * Role IDs are globally unique, so one list serves every configured guild.
- */
-export function isModerator(
-  interaction: APIInteraction,
-  deps: Pick<RouterDeps, 'guildIds' | 'moderatorRoleIds'>,
-): boolean {
-  if (!interaction.guild_id || !deps.guildIds.includes(interaction.guild_id) || !interaction.member) return false;
-  return interaction.member.roles.some((r) => deps.moderatorRoleIds.includes(r));
+/** `member.roles` only exists for interactions in a guild; the caller has checked the guild is configured. */
+export function isModerator(interaction: APIInteraction, guild: GuildSettings): boolean {
+  return !!interaction.member?.roles.some((r) => guild.moderator_roles.includes(r));
+}
+
+/** Members need a member role; moderators can always use member commands. */
+export function isMember(interaction: APIInteraction, guild: GuildSettings): boolean {
+  return isModerator(interaction, guild) || !!interaction.member?.roles.some((r) => guild.member_roles.includes(r));
 }
 
 export function splitCustomId(customId: string): [string, string] {

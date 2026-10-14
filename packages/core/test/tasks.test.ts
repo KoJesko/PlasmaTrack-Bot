@@ -10,19 +10,19 @@ import {
 } from '../src/interactions/tasks.ts';
 import { RetryableError, UserFacingError, type QueueMessage, type TaskDefinition } from '../src/interactions/types.ts';
 import type { Notice } from '../src/ports.ts';
-import { APP_ID, INTERACTION_TOKEN, taskDeps, USER_A, USER_B } from './helpers.ts';
+import { APP_ID, BACKEND, GUILD_ID, INTERACTION_TOKEN, taskDeps, USER_A, USER_B } from './helpers.ts';
 
 function message(taskName: string, now: number, noticeHint = true, userId = USER_A): QueueMessage {
   return {
     type: 'interaction-task',
     task: { name: taskName, input: null },
-    interaction: { id: '1', applicationId: APP_ID, token: INTERACTION_TOKEN, userId, receivedAt: now },
+    interaction: { id: '1', applicationId: APP_ID, token: INTERACTION_TOKEN, userId, guildId: GUILD_ID, receivedAt: now },
     noticeHint,
   };
 }
 
 function notice(id: string, createdAt: number, text = `notice ${id}`): Notice {
-  return { id, kind: 'invalid_delivery', text, createdAt, expiresAt: createdAt + 86_400_000 };
+  return { id, backend: BACKEND, kind: 'invalid_delivery', text, createdAt, expiresAt: createdAt + 86_400_000 };
 }
 
 describe('notices task', () => {
@@ -41,8 +41,8 @@ describe('notices task', () => {
     expect(body).toContain('Job 12 was marked Invalid');
     expect(body).toContain('Speed penalty activated');
     expect(body).not.toContain('SECRET-OF-USER-B');
-    expect(await notices.countUnread(USER_A)).toBe(0);
-    expect(await notices.countUnread(USER_B)).toBe(1);
+    expect(await notices.countUnread(USER_A, BACKEND)).toBe(0);
+    expect(await notices.countUnread(USER_B, BACKEND)).toBe(1);
     // No hint after /notices itself.
     expect(discord.calls).toHaveLength(1);
   });
@@ -53,7 +53,7 @@ describe('notices task', () => {
     discord.failNext = new DiscordApiError(429, undefined, 3.2, 'rate limited');
     const r = await processQueueMessage(message(NOTICES_TASK, clock.t), tasks, deps);
     expect(r).toEqual({ status: 'retry', delaySeconds: 4 });
-    expect(await notices.countUnread(USER_A)).toBe(1);
+    expect(await notices.countUnread(USER_A, BACKEND)).toBe(1);
   });
 
   it('ignores expired notices', async () => {
@@ -132,7 +132,7 @@ describe('processQueueMessage', () => {
     await notices.add(USER_A, notice('a2', clock.t));
     const hint: QueueMessage = {
       type: 'notice-hint',
-      interaction: { id: '1', applicationId: APP_ID, token: INTERACTION_TOKEN, userId: USER_A, receivedAt: clock.t },
+      interaction: { id: '1', applicationId: APP_ID, token: INTERACTION_TOKEN, userId: USER_A, guildId: GUILD_ID, receivedAt: clock.t },
     };
     expect(await processQueueMessage(hint, all, deps)).toEqual({ status: 'done' });
     expect((discord.calls[0]!.message as { content: string }).content).toContain('2 unread notices');

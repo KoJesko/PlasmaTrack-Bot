@@ -18,7 +18,7 @@ type Sent = { content?: string; flags?: number; embeds?: { title?: string; descr
 function setup(opts: { connected?: boolean; renderFails?: boolean; truckersmp?: Record<number, string | null> } = {}) {
   const server = new MockPlasmaTrackServer();
   const t = taskDeps();
-  if (opts.connected !== false) t.deps.api = new PlasmaTrackApi({ baseUrl: BASE_URL, token: BOT_TOKEN, fetch: server.fetch });
+  if (opts.connected !== false) t.backend.api = new PlasmaTrackApi({ baseUrl: BASE_URL, token: BOT_TOKEN, fetch: server.fetch });
   const renders: unknown[] = [];
   t.deps.renderer = {
     renderRoute: async (req) => {

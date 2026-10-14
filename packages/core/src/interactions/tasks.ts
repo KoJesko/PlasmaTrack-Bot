@@ -1,5 +1,6 @@
 import { MessageFlags } from '../discord/constants.ts';
 import { DiscordApiError } from '../discord/rest.ts';
+import type { PlasmaTrackApi } from '../api/client.ts';
 import { processPlayerDm, processWebhookEvent, type EventDeps } from '../webhooks/process.ts';
 import {
   RetryableError,
@@ -17,8 +18,13 @@ const TOKEN_SAFETY_MS = 30_000;
 
 export const GENERIC_FAILURE = 'Sorry, something went wrong. Please try again later.';
 
-/** Everything the queue consumer needs. */
-export type ConsumerDeps = TaskDeps & EventDeps;
+/** Which backend serves a Discord server; null outside a configured server. */
+export interface BackendResolver {
+  forGuild(guildId: string | undefined): { name: string; api: PlasmaTrackApi | null } | null;
+}
+
+/** Everything the queue consumer needs. `api` and `backend` are filled in per interaction. */
+export type ConsumerDeps = Omit<TaskDeps, 'api' | 'backend'> & EventDeps & { backends: BackendResolver };
 
 /** Runs one queued message. The host's queue consumer maps the result to ack/retry. */
 export async function processQueueMessage(
@@ -31,8 +37,10 @@ export async function processQueueMessage(
       return processWebhookEvent(message, deps);
     case 'player-dm':
       return processPlayerDm(message, deps);
-    default:
-      return processInteractionMessage(message, tasks, deps);
+    default: {
+      const backend = deps.backends.forGuild(message.interaction.guildId);
+      return processInteractionMessage(message, tasks, { ...deps, api: backend?.api ?? null, backend: backend?.name ?? null });
+    }
   }
 }
 
@@ -88,8 +96,9 @@ export const NOTICES_TASK = 'notices.list';
  * Best effort: a failure here never fails the command.
  */
 export async function sendNoticeHint(ref: InteractionRef, deps: TaskDeps): Promise<void> {
+  if (!deps.backend) return;
   try {
-    const count = await deps.notices.countUnread(ref.userId);
+    const count = await deps.notices.countUnread(ref.userId, deps.backend);
     if (count === 0) return;
     await deps.discord.followup(ref.token, {
       content: `You have ${count} unread notice${count === 1 ? '' : 's'} that couldn't be sent as a DM. Use \`/notices\` to read ${count === 1 ? 'it' : 'them'} (only you can see this).`,
