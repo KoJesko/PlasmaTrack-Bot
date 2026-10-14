@@ -1,7 +1,7 @@
 // Fails if any installed package (direct or transitive, any workspace) has a
 // license outside the FOSS allowlist below. Run: npm run license-audit
 //
-// Adding a license to ALLOWED, or a package to REVIEWED, needs the project
+// Adding a license to ALLOWED, or a package to REVIEWED or APPROVED_PACKAGES, needs the project
 // owner's OK (rule: every dependency must be FOSS; ask before anything else).
 
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
@@ -29,17 +29,19 @@ const ALLOWED = new Set([
 // name -> the license found in the package's own files.
 const REVIEWED = {};
 
-// Free but not a software license; waiting for the project owner's decision.
-// Listed packages warn instead of failing. Remove an entry once decided.
-const PENDING_OWNER_DECISION = {
-  'spdx-exceptions':
-    'CC-BY-3.0 data file (list of SPDX exception IDs). Pulled in by @maplibre/maplibre-gl-native → npm-run-all → read-pkg; not loaded by PlasmaTrack code.',
+// Free licenses accepted for one named package only, not added to ALLOWED.
+// name -> the exact license string accepted. A different license on that
+// package (e.g. after an upgrade) fails the audit again.
+const APPROVED_PACKAGES = {
+  // Data file (list of SPDX exception IDs), pulled in by
+  // @maplibre/maplibre-gl-native → npm-run-all → read-pkg; not loaded by
+  // PlasmaTrack code. Approved by the project owner 2026-10-13.
+  'spdx-exceptions': 'CC-BY-3.0',
 };
 
 const root = join(import.meta.dirname, '..');
 const seen = new Map(); // "name@version" -> license
 const problems = [];
-const pending = [];
 
 function readLicense(pkg) {
   if (typeof pkg.license === 'string') return pkg.license;
@@ -97,10 +99,7 @@ function visit(dir) {
     const license = readLicense(pkg) ?? REVIEWED[pkg.name] ?? null;
     seen.set(id, license);
     if (!license) problems.push(`${id}: no license field`);
-    else if (!isAllowed(license)) {
-      if (PENDING_OWNER_DECISION[pkg.name]) pending.push(`${id}: ${license} — ${PENDING_OWNER_DECISION[pkg.name]}`);
-      else problems.push(`${id}: ${license}`);
-    }
+    else if (!isAllowed(license) && APPROVED_PACKAGES[pkg.name] !== license) problems.push(`${id}: ${license}`);
   }
   walk(join(dir, 'node_modules'));
 }
@@ -113,11 +112,8 @@ for (const l of seen.values()) counts[l ?? '(none)'] = (counts[l ?? '(none)'] ??
 console.log(`license audit: ${seen.size} packages`);
 for (const [l, n] of Object.entries(counts).sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${l}`);
 
-if (pending.length > 0) {
-  console.warn(`\nWARNING: ${pending.length} package(s) await the project owner's license decision:\n  ${pending.join('\n  ')}`);
-}
 if (problems.length > 0) {
   console.error(`\n${problems.length} package(s) need review:\n  ${problems.join('\n  ')}`);
   process.exit(1);
 }
-console.log(pending.length > 0 ? '\nEverything else is on the FOSS allowlist.' : '\nAll licenses are on the FOSS allowlist.');
+console.log('\nAll licenses are on the FOSS allowlist or individually approved.');

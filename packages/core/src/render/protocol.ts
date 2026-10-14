@@ -5,7 +5,7 @@ import { bytesToHex, hexToBytes, sha256Hex, timingSafeEqual, utf8 } from '../byt
 // ours), unlike the PlasmaTrack server API, which we only consume.
 
 /** Bump when the request format or the rendered style changes; it is part of every cache key. */
-export const RENDER_PROTOCOL_VERSION = 1;
+export const RENDER_PROTOCOL_VERSION = 2;
 
 export const ROUTE_PATH = '/v1/render/route';
 export const CHART_PATH = '/v1/render/chart';
@@ -33,6 +33,39 @@ export function normalizeScaleClass(value: unknown): ScaleClass {
   return (SCALE_CLASSES as readonly unknown[]).includes(value) ? (value as ScaleClass) : 'unknown';
 }
 
+/**
+ * What a stretch is (server contract PUBLIC_API §4). Only `driving` follows
+ * the road; the others are straight lines between their ends. Anything the
+ * renderer doesn't recognise is drawn as `gap` (missing data).
+ */
+export const ROUTE_SEGMENTS = ['driving', 'ferry', 'train', 'teleport', 'gap'] as const;
+export type RouteSegment = (typeof ROUTE_SEGMENTS)[number];
+
+export function normalizeSegment(value: unknown): RouteSegment {
+  if (value === undefined || value === null) return 'driving';
+  return (ROUTE_SEGMENTS as readonly unknown[]).includes(value) ? (value as RouteSegment) : 'gap';
+}
+
+/** Admin routes only: stretches undone by a save load are `reverted`. `restored` counts like `kept`. */
+export const ROUTE_STATUSES = ['kept', 'reverted', 'restored'] as const;
+export type RouteStatus = (typeof ROUTE_STATUSES)[number];
+
+export function normalizeStatus(value: unknown): RouteStatus {
+  return value === 'reverted' || value === 'restored' ? value : 'kept';
+}
+
+/** Legend entries other than the scale classes, in legend order. */
+export const ROUTE_EXTRAS = ['uncounted', 'ferry_train', 'teleport', 'gap', 'reverted'] as const;
+export type RouteExtra = (typeof ROUTE_EXTRAS)[number];
+
+export const ROUTE_EXTRA_LABELS: Record<RouteExtra, string> = {
+  uncounted: 'Not counted (e.g. empty drive to pickup)',
+  ferry_train: 'Ferry or train',
+  teleport: 'Teleport (no distance)',
+  gap: 'Missing data',
+  reverted: 'Undone by a save load',
+};
+
 export const MAX_ROUTE_FEATURES = 5_000;
 export const MAX_ROUTE_VERTICES = 100_000;
 
@@ -47,11 +80,22 @@ const routeFeature = z.object({
   properties: z
     .object({
       scale_class: z.unknown().optional().transform(normalizeScaleClass),
+      segment: z.unknown().optional().transform(normalizeSegment),
+      counted: z.boolean().optional().default(true),
+      status: z.unknown().optional().transform(normalizeStatus),
       local_scale: z.number().nullable().optional(),
     })
     .loose()
     .nullable()
-    .transform((p) => p ?? { scale_class: 'unknown' as const }),
+    .transform(
+      (p) =>
+        p ?? {
+          scale_class: 'unknown' as const,
+          segment: 'driving' as const,
+          counted: true,
+          status: 'kept' as const,
+        },
+    ),
 });
 
 export const routeGeoJsonSchema = z

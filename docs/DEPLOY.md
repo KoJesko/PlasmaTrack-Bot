@@ -17,9 +17,11 @@ secrets go in Cloudflare's secret store, and renderer secrets in its environment
 
 On the host of your choice:
 
-    git clone <this repo> && cd plasmatrack-bot && npm install
+    git clone <this repo> plasmatrack-bot
+    cd plasmatrack-bot
+    npm install
     cp packages/renderer/renderer.env.example packages/renderer/renderer.env
-    # RENDERER_KEY: generate once, use the same value for the Worker secret below
+    # RENDERER_KEY: <shared secret, at least 32 random characters; same value as the Worker's RENDERER_KEY>
     # TILES_ETS2 / TILES_ATS: your basemaps (docs/TILES.md)
     npm start -w @plasmatrack/renderer
 
@@ -34,16 +36,28 @@ On the host of your choice:
 
 ## 3. Cloudflare resources
 
-From `packages/worker`, logged in with `npx wrangler login`:
+Run these from the `packages/worker` folder (one command per line; works in PowerShell and POSIX shells):
 
-    npx wrangler d1 create plasmatrack-bot                 # copy database_id into wrangler.toml
+    cd packages/worker
+    cp wrangler.sample.toml wrangler.toml
+    npx wrangler login
+    npx wrangler d1 create plasmatrack-bot                 # prints the database_id
     npx wrangler queues create plasmatrack-work
     npx wrangler r2 bucket create plasmatrack-render-cache
-    cp wrangler.sample.toml wrangler.toml                  # fill in the IDs and [vars]
+
+Now edit `wrangler.toml`: paste the `database_id`, and fill in every `[vars]` value from step 1.
+Until the renderer is running, set `RENDERER_URL = "https://renderer.invalid"`. That's a
+reserved name that never resolves, and nothing calls the renderer before the `/job` command
+exists. Then:
+
     npx wrangler d1 migrations apply plasmatrack-bot --remote
     npx wrangler secret put DISCORD_BOT_TOKEN
     npx wrangler secret put RENDERER_KEY
     npx wrangler deploy
+
+The Worker validates its configuration on every request. If anything is missing or still a
+placeholder, it answers 500 and logs the names of the bad keys (never their values). Watch
+the logs with `npx wrangler tail`.
 
 - Add an **R2 lifecycle rule** on `plasmatrack-render-cache` (e.g. delete objects after 30
   days). Images are content-addressed, so expiry only costs a re-render.
@@ -55,15 +69,22 @@ From `packages/worker`, logged in with `npx wrangler login`:
 
 1. In the developer portal, set **Interactions Endpoint URL** to
    `https://<your-worker-host>/interactions`. Discord verifies it with a signed PING when you save.
-2. Register the commands: `npm run register-commands -w @plasmatrack/worker`.
+2. Register the commands, from the repo root: `npm run register-commands -w @plasmatrack/worker`.
 3. Moderator commands are hidden from everyone except server admins by default. To let
    moderators use them, go to **Server Settings → Integrations → PlasmaTrack** and allow the
    moderator role. The bot independently re-checks `MODERATOR_ROLE_IDS` on every use.
 
 ## Updating
 
-    git pull && npm install && npm run check
-    cd packages/worker && npx wrangler d1 migrations apply plasmatrack-bot --remote && npx wrangler deploy
+From the repo root:
+
+    git pull
+    npm install
+    npm run check
+    cd packages/worker
+    npx wrangler d1 migrations apply plasmatrack-bot --remote
+    npx wrangler deploy
+    cd ../..
     npm run register-commands -w @plasmatrack/worker      # only if commands changed
 
 Restart the renderer after pulling. Its style and protocol version

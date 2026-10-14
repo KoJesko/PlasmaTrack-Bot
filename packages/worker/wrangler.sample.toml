@@ -44,6 +44,7 @@ crons = ["17 3 * * *"]
 [vars]
 DISCORD_APPLICATION_ID = "<application id>"
 DISCORD_PUBLIC_KEY = "<application public key, 64 hex chars>"
+# The PlasmaTrack server id. Comma-separate to add test servers.
 DISCORD_GUILD_ID = "<the PlasmaTrack server id>"
 # Comma-separated role IDs allowed to use moderator commands.
 MODERATOR_ROLE_IDS = "<role id>,<role id>"

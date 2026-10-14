@@ -1,5 +1,5 @@
 # Copy to .dev.vars (git-ignored) for `wrangler dev`. Never commit real values.
-DISCORD_BOT_TOKEN=MTU1OTc1MTA3ODQ2NjE2MjgxMQ.GRsVDy.6hGdMQT1ZYpooHExQWa_McuZeFEOCwv3Zbmg1Y
+DISCORD_BOT_TOKEN=
 # Shared HMAC key with the renderer; at least 32 random characters.
 # e.g. node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 RENDERER_KEY=

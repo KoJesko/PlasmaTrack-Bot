@@ -12,13 +12,28 @@ export const systemClock: Clock = { now: () => Date.now() };
 /** At-least-once background work. Handlers must tolerate redelivery. */
 export interface WorkQueue<T> {
   send(item: T, options?: { delaySeconds?: number }): Promise<void>;
+  /** Many items at once (e.g. one DM per revocation recipient). */
+  sendBatch(items: T[]): Promise<void>;
 }
 
 /** Remembers keys for a while; used to drop duplicate webhook deliveries. */
 export interface DedupeStore {
   /** Returns true if the key was not seen before (and records it), false if it was. */
   claim(key: string, ttlSeconds: number): Promise<boolean>;
+  /** Forgets a claim, so a failed attempt can be retried. */
+  release(key: string): Promise<void>;
   purgeExpired(): Promise<number>;
+}
+
+/**
+ * Highest `job_version` handled per job. Webhooks have no ordering guarantee
+ * (server WEBHOOKS §3), so an event older than one already handled is ignored.
+ */
+export interface JobVersionStore {
+  /** Records `version` and returns true if it is newer than any seen for the job; false otherwise. */
+  advance(jobId: string, version: number): Promise<boolean>;
+  /** Forgets jobs not updated since `before` (ms). Webhooks are retried for at most 72 h. */
+  purgeOlderThan(before: number): Promise<number>;
 }
 
 export interface CachedBlob {
@@ -32,7 +47,7 @@ export interface BlobCache {
   put(key: string, blob: CachedBlob): Promise<void>;
 }
 
-export type NoticeKind = 'invalid_delivery' | 'speed_penalty' | 'revocation_scheduled' | 'other';
+export type NoticeKind = 'invalid_delivery' | 'speed_penalty' | 'revocation_scheduled' | 'revocation_cancelled' | 'other';
 
 export interface Notice {
   id: string;

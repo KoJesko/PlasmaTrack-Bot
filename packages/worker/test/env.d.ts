@@ -1,4 +1,4 @@
-import type { D1Migration } from '@cloudflare/vitest-pool-workers';
+import type { D1Migration } from '@cloudflare/vitest-plugin';
 import type { Env as WorkerEnv } from '../src/env.ts';
 
 declare global {

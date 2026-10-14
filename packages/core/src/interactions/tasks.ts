@@ -1,9 +1,11 @@
 import { MessageFlags } from '../discord/constants.ts';
 import { DiscordApiError } from '../discord/rest.ts';
+import { processPlayerDm, processWebhookEvent, type EventDeps } from '../webhooks/process.ts';
 import {
   RetryableError,
   UserFacingError,
   type InteractionRef,
+  type ProcessResult,
   type QueueMessage,
   type TaskDefinition,
   type TaskDeps,
@@ -15,14 +17,27 @@ const TOKEN_SAFETY_MS = 30_000;
 
 export const GENERIC_FAILURE = 'Sorry, something went wrong. Please try again later.';
 
-export type ProcessResult =
-  | { status: 'done' }
-  | { status: 'retry'; delaySeconds: number }
-  | { status: 'dropped'; reason: string };
+/** Everything the queue consumer needs. */
+export type ConsumerDeps = TaskDeps & EventDeps;
 
 /** Runs one queued message. The host's queue consumer maps the result to ack/retry. */
 export async function processQueueMessage(
   message: QueueMessage,
+  tasks: readonly TaskDefinition[],
+  deps: ConsumerDeps,
+): Promise<ProcessResult> {
+  switch (message.type) {
+    case 'webhook':
+      return processWebhookEvent(message, deps);
+    case 'player-dm':
+      return processPlayerDm(message, deps);
+    default:
+      return processInteractionMessage(message, tasks, deps);
+  }
+}
+
+async function processInteractionMessage(
+  message: Extract<QueueMessage, { type: 'interaction-task' | 'notice-hint' }>,
   tasks: readonly TaskDefinition[],
   deps: TaskDeps,
 ): Promise<ProcessResult> {

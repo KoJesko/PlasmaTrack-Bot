@@ -23,7 +23,8 @@ import type {
 export interface RouterDeps {
   handlers: InteractionHandlers;
   applicationId: string;
-  guildId: string;
+  /** Guilds where moderator commands are allowed. */
+  guildIds: readonly string[];
   moderatorRoleIds: readonly string[];
   queue: WorkQueue<QueueMessage>;
   logger: Logger;
@@ -141,15 +142,16 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
 }
 
 /**
- * Moderator commands are registered only in the configured guild, and are
- * also refused here unless used inside that guild by a member holding a
+ * Moderator commands are registered only in the configured guild(s), and are
+ * also refused here unless used inside one of them by a member holding a
  * moderator role. `member.roles` only exists for interactions in a guild.
+ * Role IDs are globally unique, so one list serves every configured guild.
  */
 export function isModerator(
   interaction: APIInteraction,
-  deps: Pick<RouterDeps, 'guildId' | 'moderatorRoleIds'>,
+  deps: Pick<RouterDeps, 'guildIds' | 'moderatorRoleIds'>,
 ): boolean {
-  if (interaction.guild_id !== deps.guildId || !interaction.member) return false;
+  if (!interaction.guild_id || !deps.guildIds.includes(interaction.guild_id) || !interaction.member) return false;
   return interaction.member.roles.some((r) => deps.moderatorRoleIds.includes(r));
 }
 

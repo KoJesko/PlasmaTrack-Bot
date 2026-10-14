@@ -4,6 +4,7 @@ import { RetryableError } from '../src/interactions/types.ts';
 import { MemoryBlobCache } from '../src/memory.ts';
 import { RendererClient } from '../src/render/client.ts';
 import {
+  RENDER_PROTOCOL_VERSION,
   ROUTE_PATH,
   routeRenderRequestSchema,
   signRendererRequest,
@@ -104,7 +105,7 @@ describe('RendererClient', () => {
     const second = await c.renderRoute(structuredClone(request));
     expect(second.cached).toBe(true);
     expect(calls).toHaveLength(1);
-    expect([...cache.blobs.keys()][0]).toMatch(/^route\/v1\/[0-9a-f]{64}\.png$/);
+    expect([...cache.blobs.keys()][0]).toMatch(new RegExp(`^route/v${RENDER_PROTOCOL_VERSION}/[0-9a-f]{64}\\.png$`));
   });
 
   it('turns outages into retryable errors and rejections into plain errors', async () => {

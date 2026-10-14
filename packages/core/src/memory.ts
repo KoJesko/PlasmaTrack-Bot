@@ -3,6 +3,7 @@ import type {
   CachedBlob,
   Clock,
   DedupeStore,
+  JobVersionStore,
   Notice,
   NoticeStore,
   WorkQueue,
@@ -18,6 +19,10 @@ export class MemoryWorkQueue<T> implements WorkQueue<T> {
     this.items.push(
       options?.delaySeconds === undefined ? { item: copy } : { item: copy, delaySeconds: options.delaySeconds },
     );
+  }
+
+  async sendBatch(items: T[]): Promise<void> {
+    for (const item of items) await this.send(item);
   }
 
   take(): T[] {
@@ -41,12 +46,43 @@ export class MemoryDedupeStore implements DedupeStore {
     return true;
   }
 
+  async release(key: string): Promise<void> {
+    this.seen.delete(key);
+  }
+
   async purgeExpired(): Promise<number> {
     const now = this.clock.now();
     let n = 0;
     for (const [k, exp] of this.seen) {
       if (exp <= now) {
         this.seen.delete(k);
+        n++;
+      }
+    }
+    return n;
+  }
+}
+
+export class MemoryJobVersionStore implements JobVersionStore {
+  private readonly versions = new Map<string, { version: number; at: number }>();
+  private readonly clock: Clock;
+
+  constructor(clock: Clock = systemClock) {
+    this.clock = clock;
+  }
+
+  async advance(jobId: string, version: number): Promise<boolean> {
+    const current = this.versions.get(jobId);
+    if (current && current.version >= version) return false;
+    this.versions.set(jobId, { version, at: this.clock.now() });
+    return true;
+  }
+
+  async purgeOlderThan(before: number): Promise<number> {
+    let n = 0;
+    for (const [id, v] of this.versions) {
+      if (v.at < before) {
+        this.versions.delete(id);
         n++;
       }
     }

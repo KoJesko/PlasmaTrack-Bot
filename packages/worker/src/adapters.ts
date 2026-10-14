@@ -6,6 +6,7 @@ import type {
   CachedBlob,
   Clock,
   DedupeStore,
+  JobVersionStore,
   Notice,
   NoticeKind,
   NoticeStore,
@@ -22,6 +23,13 @@ export class CloudflareWorkQueue<T> implements WorkQueue<T> {
 
   async send(item: T, options?: { delaySeconds?: number }): Promise<void> {
     await this.queue.send(item, options?.delaySeconds ? { delaySeconds: options.delaySeconds } : undefined);
+  }
+
+  async sendBatch(items: T[]): Promise<void> {
+    // Queues accept at most 100 messages per sendBatch call.
+    for (let i = 0; i < items.length; i += 100) {
+      await this.queue.sendBatch(items.slice(i, i + 100).map((body) => ({ body })));
+    }
   }
 }
 
@@ -48,8 +56,40 @@ export class D1DedupeStore implements DedupeStore {
     return result.meta.changes === 1;
   }
 
+  async release(key: string): Promise<void> {
+    await this.db.prepare('DELETE FROM dedupe WHERE key = ?1').bind(key).run();
+  }
+
   async purgeExpired(): Promise<number> {
     const result = await this.db.prepare('DELETE FROM dedupe WHERE expires_at <= ?1').bind(this.clock.now()).run();
+    return result.meta.changes;
+  }
+}
+
+export class D1JobVersionStore implements JobVersionStore {
+  private readonly db: D1Database;
+  private readonly clock: Clock;
+
+  constructor(db: D1Database, clock: Clock = systemClock) {
+    this.db = db;
+    this.clock = clock;
+  }
+
+  async advance(jobId: string, version: number): Promise<boolean> {
+    // Insert, or raise the stored version; an equal or older one changes nothing.
+    const result = await this.db
+      .prepare(
+        `INSERT INTO job_versions (job_id, version, updated_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT (job_id) DO UPDATE SET version = excluded.version, updated_at = excluded.updated_at
+         WHERE job_versions.version < excluded.version`,
+      )
+      .bind(jobId, version, this.clock.now())
+      .run();
+    return result.meta.changes === 1;
+  }
+
+  async purgeOlderThan(before: number): Promise<number> {
+    const result = await this.db.prepare('DELETE FROM job_versions WHERE updated_at < ?1').bind(before).run();
     return result.meta.changes;
   }
 }

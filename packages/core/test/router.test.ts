@@ -7,6 +7,7 @@ import type { WorkQueue } from '../src/ports.ts';
 import {
   buttonInteraction,
   commandInteraction,
+  GUILD_ID,
   INTERACTION_TOKEN,
   modalInteraction,
   MOD_ROLE,
@@ -112,7 +113,7 @@ describe('handleInteraction', () => {
 
     it('a stalled queue still gets an answer before the deadline', async () => {
       vi.useFakeTimers();
-      const stalled: WorkQueue<QueueMessage> = { send: () => new Promise(() => {}) };
+      const stalled: WorkQueue<QueueMessage> = { send: () => new Promise(() => {}), sendBatch: () => new Promise(() => {}) };
       const { deps } = routerDeps({ queue: stalled, enqueueTimeoutMs: 2000 });
       const pending = handleInteraction(commandInteraction('notices'), deps);
       await vi.advanceTimersByTimeAsync(2000);
@@ -122,7 +123,10 @@ describe('handleInteraction', () => {
     });
 
     it('a failing queue is reported to the user ephemerally', async () => {
-      const failing: WorkQueue<QueueMessage> = { send: () => Promise.reject(new Error('queue down')) };
+      const failing: WorkQueue<QueueMessage> = {
+        send: () => Promise.reject(new Error('queue down')),
+        sendBatch: () => Promise.reject(new Error('queue down')),
+      };
       const { deps } = routerDeps({ queue: failing });
       const r = await handleInteraction(commandInteraction('notices'), deps);
       const data = (r.response as { data: { content: string; flags: number } }).data;
@@ -147,9 +151,15 @@ describe('handleInteraction', () => {
     }
 
     it('refuses a moderator command from another guild even with a same-ID role', async () => {
-      const { deps } = routerDeps({ handlers: testHandlers, guildId: '888888888888888888' });
+      const { deps } = routerDeps({ handlers: testHandlers, guildIds: ['888888888888888888'] });
       const r = await handleInteraction(commandInteraction('modtool', { roles: [MOD_ROLE] }), deps);
       expect((r.response as { data: { content: string } }).data.content).toBe(NOT_ALLOWED);
+    });
+
+    it('allows moderator commands in any configured guild', async () => {
+      const { deps } = routerDeps({ handlers: testHandlers, guildIds: ['888888888888888888', GUILD_ID] });
+      const r = await handleInteraction(commandInteraction('modtool', { roles: [MOD_ROLE] }), deps);
+      expect((r.response as { data: { content: string } }).data.content).toBe('mod ok');
     });
 
     it('also gates buttons and modal submissions', async () => {

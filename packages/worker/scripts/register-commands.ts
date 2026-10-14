@@ -36,7 +36,7 @@ if (missing.length > 0) {
   process.exit(1);
 }
 const appId = vars['DISCORD_APPLICATION_ID']!;
-const guildId = vars['DISCORD_GUILD_ID']!;
+const guildIds = vars['DISCORD_GUILD_ID']!.split(',').map((s) => s.trim()).filter(Boolean);
 
 async function put(path: string, body: unknown, label: string): Promise<void> {
   const res = await fetch(DISCORD_API + path, {
@@ -46,11 +46,20 @@ async function put(path: string, body: unknown, label: string): Promise<void> {
   });
   if (!res.ok) {
     console.error(`${label}: Discord answered ${res.status}: ${await res.text()}`);
-    process.exit(1);
+    throw new Error(label);
   }
   const names = ((await res.json()) as { name: string }[]).map((c) => c.name);
   console.log(`${label}: ${names.length} command(s): ${names.join(', ') || '(none)'}`);
 }
 
 await put(`/applications/${appId}/commands`, registration.global, 'global (guild + DMs)');
-await put(`/applications/${appId}/guilds/${guildId}/commands`, registration.guild, `guild ${guildId} (moderators)`);
+let failed = false;
+for (const guildId of guildIds) {
+  // One guild failing (e.g. bot not invited yet) shouldn't stop the others.
+  try {
+    await put(`/applications/${appId}/guilds/${guildId}/commands`, registration.guild, `guild ${guildId} (moderators)`);
+  } catch {
+    failed = true;
+  }
+}
+if (failed) process.exit(1);

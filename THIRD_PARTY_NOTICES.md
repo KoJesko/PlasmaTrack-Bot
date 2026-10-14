@@ -35,15 +35,15 @@ the full installed tree (direct and transitive) against the allowlist in
 | wrangler | MIT OR Apache-2.0 |
 | workerd (local Workers runtime) | Apache-2.0 |
 | @cloudflare/workers-types | MIT OR Apache-2.0 |
-| @cloudflare/vitest-pool-workers | MIT |
+| @cloudflare/vitest-plugin | MIT |
 | geojson-vt (test fixtures only) | ISC |
 | @types/node, @types/geojson | MIT |
 
-## Awaiting a decision
+## Individually approved
 
 | Package | License | Notes |
 |---|---|---|
-| spdx-exceptions | CC-BY-3.0 | A data file (list of SPDX exception IDs), pulled in by `@maplibre/maplibre-gl-native` → `npm-run-all` → `read-pkg`. PlasmaTrack code never loads it. Free, but not a software license; the license audit warns until the project owner decides. |
+| spdx-exceptions | CC-BY-3.0 | A data file (list of SPDX exception IDs) by the SPDX workgroup, pulled in by `@maplibre/maplibre-gl-native` → `npm-run-all` → `read-pkg`. PlasmaTrack code never loads it. Approved by the project owner on 2026-10-13 for this package only. |
 
 ## Map data and tools (not distributed with this repository)
 

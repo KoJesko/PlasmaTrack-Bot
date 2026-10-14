@@ -6,18 +6,27 @@ import {
   handleInteraction,
   handlers,
   parseBotConfig,
+  PlasmaTrackApi,
   processQueueMessage,
+  receiveWebhook,
   secretValues,
   systemClock,
   tasks,
   verifyDiscordSignature,
+  WEBHOOK_EVENT_ID_HEADER,
+  WEBHOOK_MAX_BYTES,
+  WEBHOOK_SIGNATURE_HEADER,
   type BotConfig,
+  type ConsumerDeps,
   type Logger,
   type QueueMessage,
-  type TaskDeps,
 } from '@plasmatrack/core';
 import type { APIInteraction } from 'discord-api-types/v10';
-import { CloudflareWorkQueue, D1DedupeStore, D1NoticeStore, R2BlobCache } from './adapters.ts';
+import { CloudflareWorkQueue, D1DedupeStore, D1JobVersionStore, D1NoticeStore, R2BlobCache } from './adapters.ts';
+
+export const WEBHOOK_PATH = '/webhooks/plasmatrack';
+/** Job versions are kept a week: longer than the server's 72 h retry window. */
+const JOB_VERSION_RETENTION_MS = 7 * 24 * 3600_000;
 import type { Env } from './env.ts';
 
 interface Runtime {
@@ -36,7 +45,7 @@ function runtime(env: Env): Runtime {
   return cached.runtime;
 }
 
-function taskDeps(env: Env, rt: Runtime): TaskDeps {
+function consumerDeps(env: Env, rt: Runtime): ConsumerDeps {
   return {
     discord: new DiscordRest({ applicationId: rt.config.DISCORD_APPLICATION_ID, botToken: rt.config.DISCORD_BOT_TOKEN }),
     notices: new D1NoticeStore(env.DB),
@@ -47,7 +56,35 @@ function taskDeps(env: Env, rt: Runtime): TaskDeps {
       key: rt.config.RENDERER_KEY,
       cache: new R2BlobCache(env.RENDER_CACHE),
     }),
+    api:
+      rt.config.PLASMATRACK_API_URL && rt.config.PLASMATRACK_BOT_TOKEN
+        ? new PlasmaTrackApi({ baseUrl: rt.config.PLASMATRACK_API_URL, token: rt.config.PLASMATRACK_BOT_TOKEN })
+        : null,
+    dedupe: new D1DedupeStore(env.DB),
+    jobVersions: new D1JobVersionStore(env.DB),
+    queue: new CloudflareWorkQueue(env.WORK_QUEUE),
+    noticeTtlDays: rt.config.NOTICE_TTL_DAYS,
   };
+}
+
+async function handleWebhookRequest(request: Request, env: Env, rt: Runtime) {
+  const declared = Number(request.headers.get('Content-Length'));
+  if (Number.isFinite(declared) && declared > WEBHOOK_MAX_BYTES) return new Response('payload too large', { status: 413 });
+  const body = new Uint8Array(await request.arrayBuffer());
+  const res = await receiveWebhook(
+    {
+      body,
+      signature: request.headers.get(WEBHOOK_SIGNATURE_HEADER),
+      eventIdHeader: request.headers.get(WEBHOOK_EVENT_ID_HEADER),
+    },
+    {
+      secrets: rt.config.PLASMATRACK_WEBHOOK_SECRET ?? [],
+      queue: new CloudflareWorkQueue(env.WORK_QUEUE),
+      logger: rt.logger,
+      clock: systemClock,
+    },
+  );
+  return new Response(res.body, { status: res.status });
 }
 
 async function handleInteractionRequest(request: Request, env: Env, ctx: ExecutionContext, rt: Runtime) {
@@ -71,7 +108,7 @@ async function handleInteractionRequest(request: Request, env: Env, ctx: Executi
   const { response, background } = await handleInteraction(interaction, {
     handlers,
     applicationId: rt.config.DISCORD_APPLICATION_ID,
-    guildId: rt.config.DISCORD_GUILD_ID,
+    guildIds: rt.config.DISCORD_GUILD_ID,
     moderatorRoleIds: rt.config.MODERATOR_ROLE_IDS,
     queue,
     logger: rt.logger,
@@ -103,12 +140,13 @@ export default {
     if (pathname === '/interactions' && request.method === 'POST') {
       return handleInteractionRequest(request, env, ctx, rt);
     }
+    if (pathname === WEBHOOK_PATH && request.method === 'POST') return handleWebhookRequest(request, env, rt);
     return new Response('not found', { status: 404 });
   },
 
   async queue(batch, env, _ctx) {
     const rt = runtime(env);
-    const deps = taskDeps(env, rt);
+    const deps = consumerDeps(env, rt);
     // Messages are independent; run them side by side so one slow render
     // doesn't hold up the others in the batch.
     await Promise.all(
@@ -128,9 +166,11 @@ export default {
   async scheduled(_controller, env, ctx) {
     const rt = runtime(env);
     ctx.waitUntil(
-      Promise.all([new D1DedupeStore(env.DB).purgeExpired(), new D1NoticeStore(env.DB).purgeExpired()]).then(
-        ([dedupe, notices]) => rt.logger.info('purged expired rows', { dedupe, notices }),
-      ),
+      Promise.all([
+        new D1DedupeStore(env.DB).purgeExpired(),
+        new D1NoticeStore(env.DB).purgeExpired(),
+        new D1JobVersionStore(env.DB).purgeOlderThan(Date.now() - JOB_VERSION_RETENTION_MS),
+      ]).then(([dedupe, notices, jobVersions]) => rt.logger.info('purged expired rows', { dedupe, notices, jobVersions })),
     );
   },
 } satisfies ExportedHandler<Env, QueueMessage>;

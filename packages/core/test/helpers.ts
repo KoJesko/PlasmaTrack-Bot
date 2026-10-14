@@ -5,9 +5,10 @@ import {
   type APIInteraction,
 } from 'discord-api-types/v10';
 import { createLogger, type LogLevel } from '../src/log.ts';
-import { MemoryNoticeStore, MemoryWorkQueue } from '../src/memory.ts';
+import { MemoryDedupeStore, MemoryJobVersionStore, MemoryNoticeStore, MemoryWorkQueue } from '../src/memory.ts';
 import type { Clock } from '../src/ports.ts';
-import type { DiscordSender, QueueMessage, TaskDeps } from '../src/interactions/types.ts';
+import type { DiscordSender, QueueMessage } from '../src/interactions/types.ts';
+import type { ConsumerDeps } from '../src/interactions/tasks.ts';
 import type { RouterDeps } from '../src/interactions/router.ts';
 import { handlers } from '../src/commands/index.ts';
 
@@ -95,7 +96,7 @@ export function routerDeps(overrides: Partial<RouterDeps> = {}) {
   const deps: RouterDeps = {
     handlers,
     applicationId: APP_ID,
-    guildId: GUILD_ID,
+    guildIds: [GUILD_ID],
     moderatorRoleIds: [MOD_ROLE],
     queue,
     logger: captureLogger().logger,
@@ -126,8 +127,13 @@ export class FakeDiscord implements DiscordSender {
     this.check();
     this.calls.push({ op: 'followup', target: token, message, files });
   }
+  /** DMs to these users fail with the given error (e.g. DMs closed). */
+  dmFailures = new Map<string, Error>();
+
   async sendDirectMessage(userId: string, message: unknown) {
     this.check();
+    const fail = this.dmFailures.get(userId);
+    if (fail) throw fail;
     this.calls.push({ op: 'dm', target: userId, message, files: [] });
   }
 }
@@ -140,6 +146,20 @@ export function taskDeps(clock = new FakeClock()) {
     renderRoute: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
     renderChart: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
   };
-  const deps: TaskDeps = { discord, notices, clock, logger, renderer };
-  return { deps, discord, notices, clock, lines };
+  const queue = new MemoryWorkQueue<QueueMessage>();
+  const dedupe = new MemoryDedupeStore(clock);
+  const jobVersions = new MemoryJobVersionStore(clock);
+  const deps: ConsumerDeps = {
+    discord,
+    notices,
+    clock,
+    logger,
+    renderer,
+    api: null,
+    dedupe,
+    jobVersions,
+    queue,
+    noticeTtlDays: 30,
+  };
+  return { deps, discord, notices, clock, lines, queue, dedupe, jobVersions };
 }

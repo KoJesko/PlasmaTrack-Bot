@@ -25,7 +25,7 @@ export const COLORS = {
   background: '#f2efe9',
   mapArea: '#e2ded4',
   prefab: '#d8d3c8',
-  roadCasing: '#c4bdae',
+  roadCasing: '#a39a88',
   road: '#ffffff',
   ferry: '#7aa7c7',
   routeCasing: '#ffffff',
@@ -60,7 +60,7 @@ export function buildStyle(opts: StyleOptions): object {
           'source-layer': sourceLayer,
           filter: ofType('road'),
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-          paint: { 'line-color': COLORS.roadCasing, 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1, 9, 3, 14, 10] },
+          paint: { 'line-color': COLORS.roadCasing, 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.4, 9, 3.4, 14, 10] },
         },
         {
           id: 'roads',

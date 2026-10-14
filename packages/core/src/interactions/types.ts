@@ -6,10 +6,12 @@ import type {
   APIModalSubmitInteraction,
   RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from 'discord-api-types/v10';
+import type { PlasmaTrackApi } from '../api/client.ts';
 import type { OutgoingFile, OutgoingMessage } from '../discord/rest.ts';
 import type { Logger } from '../log.ts';
 import type { ImageRenderer } from '../render/client.ts';
-import type { Clock, NoticeStore } from '../ports.ts';
+import type { Clock, NoticeKind, NoticeStore } from '../ports.ts';
+import type { WebhookEnvelope } from '../webhooks/events.ts';
 
 export type Access = 'everyone' | 'moderator';
 
@@ -79,7 +81,22 @@ export interface InteractionRef {
 
 export type QueueMessage =
   | { type: 'interaction-task'; task: TaskRequest; interaction: InteractionRef; noticeHint: boolean }
-  | { type: 'notice-hint'; interaction: InteractionRef };
+  | { type: 'notice-hint'; interaction: InteractionRef }
+  /** A verified server webhook; `chunk` numbers the parts of a split recipient list. */
+  | { type: 'webhook'; event: WebhookEnvelope; chunk: number }
+  /** One DM to one player (fan-out of a webhook). `key` deduplicates it. */
+  | {
+      type: 'player-dm';
+      key: string;
+      userId: string;
+      message: OutgoingMessage;
+      notice: { kind: NoticeKind; text: string };
+    };
+
+export type ProcessResult =
+  | { status: 'done' }
+  | { status: 'retry'; delaySeconds: number }
+  | { status: 'dropped'; reason: string };
 
 /** What tasks can talk to. Implemented by `DiscordRest`; faked in tests. */
 export interface DiscordSender {
@@ -94,6 +111,8 @@ export interface TaskDeps {
   clock: Clock;
   logger: Logger;
   renderer: ImageRenderer;
+  /** The PlasmaTrack server, or null until it is configured (PLASMATRACK_API_URL). */
+  api: PlasmaTrackApi | null;
 }
 
 export interface TaskOutput {
