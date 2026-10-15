@@ -9,6 +9,11 @@ export const RENDER_PROTOCOL_VERSION = 2;
 
 export const ROUTE_PATH = '/v1/render/route';
 export const CHART_PATH = '/v1/render/chart';
+/** Body: the raw image (PNG, JPEG or WebP). Answer: WebP, at most COMPRESSED_MAX_EDGE px on the long side. */
+export const COMPRESS_PATH = '/v1/compress/image';
+export const COMPRESSED_MAX_EDGE = 1920;
+/** Largest image the renderer accepts for compression. */
+export const COMPRESS_MAX_INPUT_BYTES = 25 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Route images

@@ -4,6 +4,7 @@ import { apiFailure, NOT_CONNECTED, requireApi } from '../src/api/errors.ts';
 import { formatJobId, parseJobId } from '../src/api/ids.ts';
 import { toRouteRenderRequest } from '../src/api/route.ts';
 import { RetryableError, UserFacingError } from '../src/interactions/types.ts';
+import { serverRouteSchema } from '../src/api/schemas.ts';
 import { routeRenderRequestSchema } from '../src/render/protocol.ts';
 import { ADMIN_ID, BASE_URL, BOT_TOKEN, MockPlasmaTrackServer, OTHER_ID, PLAYER_ID, READ_TOKEN } from './mock-api.ts';
 
@@ -282,5 +283,19 @@ describe('route images from server routes', () => {
       ['driving', 'road', true, 'reverted'],
     ]);
     expect(JSON.stringify(req)).not.toContain('start_at');
+  });
+
+  it('draws an unnamed crossing (ferry_or_train) as a ferry, not as missing data', () => {
+    const line = { type: 'LineString' as const, coordinates: [[1, 51], [1.5, 51]] };
+    const route = serverRouteSchema.parse({
+      type: 'FeatureCollection',
+      properties: { job_id: 'KJ4MK91W', game: 'ets2' },
+      features: [
+        { type: 'Feature', geometry: line, properties: { segment: 'ferry_or_train', local_scale: null, scale_class: 'unknown', counted: true } },
+        { type: 'Feature', geometry: line, properties: { segment: 'hovercraft', scale_class: 'unknown', counted: true } },
+      ],
+    });
+    const parsed = routeRenderRequestSchema.parse(toRouteRenderRequest(route));
+    expect(parsed.route.features.map((f) => f.properties.segment)).toEqual(['ferry', 'gap']);
   });
 });

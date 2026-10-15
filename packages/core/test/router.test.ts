@@ -1,12 +1,22 @@
 import { InteractionResponseType, MessageFlags } from 'discord-api-types/v10';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { handlers } from '../src/commands/index.ts';
-import { handleInteraction, NOT_ALLOWED, NOT_HERE, NOT_MEMBER, START_FAILED } from '../src/interactions/router.ts';
+import {
+  handleInteraction,
+  NOT_ALLOWED,
+  NOT_HERE,
+  NOT_MEMBER,
+  RATE_LIMITED,
+  START_FAILED,
+  withReference,
+} from '../src/interactions/router.ts';
+import { MemoryRateLimiter } from '../src/memory.ts';
 import type { InteractionHandlers, QueueMessage } from '../src/interactions/types.ts';
-import type { WorkQueue } from '../src/ports.ts';
+import type { RateLimiter, WorkQueue } from '../src/ports.ts';
 import {
   buttonInteraction,
   commandInteraction,
+  FakeClock,
   GUILD_ID,
   GUILDS,
   MEMBER_ROLE,
@@ -121,7 +131,7 @@ describe('handleInteraction', () => {
       await vi.advanceTimersByTimeAsync(2000);
       const r = await pending;
       expect(r.response.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect((r.response as { data: { content: string } }).data.content).toBe(START_FAILED);
+      expect((r.response as { data: { content: string } }).data.content).toBe(withReference(START_FAILED, commandInteraction('notices').id));
     });
 
     it('a failing queue is reported to the user ephemerally', async () => {
@@ -132,8 +142,47 @@ describe('handleInteraction', () => {
       const { deps } = routerDeps({ queue: failing });
       const r = await handleInteraction(commandInteraction('notices'), deps);
       const data = (r.response as { data: { content: string; flags: number } }).data;
-      expect(data.content).toBe(START_FAILED);
+      expect(data.content).toBe(withReference(START_FAILED, commandInteraction('notices').id));
       expect(data.flags & MessageFlags.Ephemeral).toBeTruthy();
+    });
+  });
+
+  describe('rate limiting of slash commands', () => {
+    const content = (r: { response: unknown }) => (r.response as { data?: { content?: string } }).data?.content;
+
+    it('refuses the sixth command in 20 s, privately, without queueing it; any kind of command counts', async () => {
+      const clock = new FakeClock();
+      const { deps, queue } = routerDeps({ clock, limiter: new MemoryRateLimiter(5, 20_000, clock) });
+      const names = ['notices', 'about', 'notices', 'about', 'notices'];
+      for (const name of names) expect(content(await handleInteraction(commandInteraction(name, { roles: [MEMBER_ROLE] }), deps))).not.toBe(RATE_LIMITED);
+      const r = await handleInteraction(commandInteraction('notices', { roles: [MEMBER_ROLE] }), deps);
+      expect(content(r)).toBe(RATE_LIMITED);
+      expect((r.response as { data: { flags: number } }).data.flags & MessageFlags.Ephemeral).toBeTruthy();
+      expect(queue.take()).toHaveLength(3);
+      // A new window starts after 20 s.
+      clock.t += 20_000;
+      expect((await handleInteraction(commandInteraction('notices', { roles: [MEMBER_ROLE] }), deps)).response.type).toBe(
+        InteractionResponseType.DeferredChannelMessageWithSource,
+      );
+    });
+
+    it('applies to moderators too, but not to buttons or forms', async () => {
+      const { deps } = routerDeps({ handlers: testHandlers, limiter: new MemoryRateLimiter(0, 20_000) });
+      expect(content(await handleInteraction(commandInteraction('notices', { roles: [MOD_ROLE] }), deps))).toBe(RATE_LIMITED);
+      const button = await handleInteraction(buttonInteraction('approve:job1', { roles: [MOD_ROLE] }), deps);
+      expect(button.response.type).toBe(InteractionResponseType.DeferredMessageUpdate);
+    });
+
+    it('lets users through when the limiter is down or slow', async () => {
+      vi.useFakeTimers();
+      const broken: RateLimiter = { allow: () => Promise.reject(new Error('binding down')) };
+      const stalled: RateLimiter = { allow: () => new Promise(() => {}) };
+      for (const limiter of [broken, stalled]) {
+        const { deps } = routerDeps({ limiter, limiterTimeoutMs: 500 });
+        const pending = handleInteraction(commandInteraction('notices', { roles: [MEMBER_ROLE] }), deps);
+        await vi.advanceTimersByTimeAsync(500);
+        expect((await pending).response.type).toBe(InteractionResponseType.DeferredChannelMessageWithSource);
+      }
     });
   });
 
@@ -176,8 +225,8 @@ describe('handleInteraction', () => {
       const content = async (opts: Parameters<typeof commandInteraction>[1], name = 'boom') =>
         ((await handleInteraction(commandInteraction(name, opts), deps)).response as { data: { content: string } }).data.content;
       expect(await content({ roles: [] })).toBe(NOT_MEMBER);
-      expect(await content({ roles: [MEMBER_ROLE] })).toBe('Something went wrong handling that.');
-      expect(await content({ roles: [MOD_ROLE] })).toBe('Something went wrong handling that.');
+      expect(await content({ roles: [MEMBER_ROLE] })).toMatch(/^Something went wrong handling that\. \(Reference: \d+\)$/);
+      expect(await content({ roles: [MOD_ROLE] })).toMatch(/^Something went wrong handling that\. \(Reference: \d+\)$/);
       expect(await content({ guild: false })).toBe(NOT_HERE);
       const about = await handleInteraction(commandInteraction('about', { guild: false }), deps);
       expect(about.response.type).toBe(InteractionResponseType.ChannelMessageWithSource);

@@ -1,3 +1,5 @@
+import type { ManualJobInput } from './api/client.ts';
+
 // Storage and scheduling interfaces. The core only talks to these; each host
 // provides adapters (Cloudflare: Queues, D1, R2 in packages/worker; memory
 // adapters in ./memory.ts for tests and single-process hosts).
@@ -14,6 +16,37 @@ export interface WorkQueue<T> {
   send(item: T, options?: { delaySeconds?: number }): Promise<void>;
   /** Many items at once (e.g. one DM per revocation recipient). */
   sendBatch(items: T[]): Promise<void>;
+}
+
+/**
+ * A manual submission being prepared (/submit). One per player per backend:
+ * starting again replaces it. Holds evidence IDs, never image bytes.
+ */
+export interface ManualDraft {
+  id: string;
+  backend: string;
+  userId: string;
+  /** Bumped on every change, so an older preview's Send button can't submit newer data. */
+  rev: number;
+  job: ManualJobInput;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export interface ManualDraftStore {
+  /** The player's draft, or null if none or expired. */
+  get(backend: string, userId: string): Promise<ManualDraft | null>;
+  /** Saves it, replacing any draft of the same player. */
+  put(draft: ManualDraft): Promise<void>;
+  /** Deletes the player's draft if it is still `id`; true if it was there. */
+  delete(backend: string, userId: string, id: string): Promise<boolean>;
+  purgeExpired(): Promise<number>;
+}
+
+/** A per-key budget, e.g. queued commands per user. Hosts may count approximately. */
+export interface RateLimiter {
+  /** True if the key may go ahead now (and counts this use). */
+  allow(key: string): Promise<boolean>;
 }
 
 /** Remembers keys for a while; used to drop duplicate webhook deliveries. */

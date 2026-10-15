@@ -1,0 +1,9 @@
+**/node_modules
+**/.wrangler
+**/dist
+**/out
+**/.dev.vars
+**/renderer.env
+**/wrangler.toml
+.git
+.github

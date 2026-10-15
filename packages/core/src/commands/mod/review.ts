@@ -9,6 +9,7 @@ import type { OutgoingFile } from '../../discord/rest.ts';
 import type { CommandDefinition, ComponentDefinition, ModalDefinition, TaskDefinition, TaskDeps } from '../../interactions/types.ts';
 import { discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, OUTCOME_LABELS, pointsText } from '../format.ts';
 import { stringOption, subcommand } from '../options.ts';
+import { evidenceImages } from '../submit.ts';
 import { fuelChart, speedChart } from './charts.ts';
 import { adminFor, brief, modalValue, modFailure, privateMessage, reasonModal } from './common.ts';
 
@@ -220,6 +221,13 @@ async function jobView(job: AdminJobDetail, series: Series | null, route: Server
     embeds.push({ title: 'Fuel', image: { url: 'attachment://fuel.png' } });
   }
   if (!map && !speed && !fuel && (route || series)) main.footer = { text: 'Maps and charts aren’t available right now.' };
+  // Images of a manual job (custom map, evidence), fetched now: the links last an hour.
+  if (job.evidence.length > 0) {
+    const shown = await evidenceImages(job.evidence, deps, 10 - embeds.length);
+    embeds.push(...shown.embeds);
+    files.push(...shown.files);
+    if (shown.missing > 0) main.footer = { text: `${shown.missing} evidence image(s) couldn’t be shown.` };
+  }
   return { message: privateMessage({ embeds, components: jobButtons(job) }), files };
 }
 
@@ -276,6 +284,11 @@ export function jobEmbed(job: AdminJobDetail): APIEmbed {
     failedChecks.length > 0 ? `failed checks: ${failedChecks.join(', ')}` : null,
   ].filter(Boolean);
   if (integrityText.length > 0) fields.push({ name: 'Integrity', value: integrityText.join('\n').slice(0, 1024), inline: true });
+  if (job.origin === 'manual') fields.push(...manualFields(job));
+  const edits = Object.entries(job.overrides);
+  if (edits.length > 0) {
+    fields.push({ name: 'Edited by moderators', value: edits.map(([k, v]) => `${k.replace(/_/g, ' ')}: ${brief(v, 60)}`).join('\n').slice(0, 1024) });
+  }
   const triggered = (job.rules ?? []).filter((r) => r.triggered).map((r) => `\`${r.rule}\``);
   if (triggered.length > 0) fields.push({ name: 'Rules triggered', value: triggered.join(', ').slice(0, 1024), inline: true });
   const reverted = (job.segments ?? []).filter((s) => s.status === 'reverted').length;
@@ -289,6 +302,32 @@ export function jobEmbed(job: AdminJobDetail): APIEmbed {
     description: `**${escapeMarkdown(job.cargo.name)}**: ${escapeMarkdown(job.source.city_name)} → ${escapeMarkdown(job.destination.city_name)}`,
     fields: fields.slice(0, 25),
   };
+}
+
+/** The submitted stats (the server's sheet: km with miles beside, litres). */
+function manualFields(job: AdminJobDetail): APIEmbedField[] {
+  const s = job.sheet;
+  const fields: APIEmbedField[] = [];
+  const units = job.submission ? ` (typed in ${job.submission.unit}, ${job.submission.fuel_unit.replace('_', ' ')})` : '';
+  if (s) {
+    const lines = [
+      s.distance_km !== undefined && s.distance_km !== null ? `Distance (game): ${distance(s.distance_mi, s.distance_km)}` : null,
+      s.map_scale ? `Map scale: 1:${s.map_scale}${job.submission?.map_scale_defaulted ? ' (default)' : ''}` : null,
+      s.uk ? `UK (1:15): ${distance(s.uk.distance_mi, s.uk.distance_km)}, ${escapeMarkdown(s.uk.entry_city ?? '?')} → ${escapeMarkdown(s.uk.end_city ?? '?')}` : null,
+      s.adjusted_scale
+        ? `Adjusted (1:${s.adjusted_scale.scale ?? '?'}): ${distance(s.adjusted_scale.distance_mi, s.adjusted_scale.distance_km)}, ${escapeMarkdown(s.adjusted_scale.entry_city ?? '?')} → ${escapeMarkdown(s.adjusted_scale.exit_city ?? '?')}`
+        : null,
+      s.fuel_used_l !== undefined && s.fuel_used_l !== null ? `Fuel: ${s.fuel_used_l} L` : null,
+      s.damage_pct !== undefined && s.damage_pct !== null ? `Damage: ${s.damage_pct}%` : null,
+      s.profit !== undefined && s.profit !== null ? `Profit: ${s.profit}` : null,
+      s.truck ? `Truck: ${escapeMarkdown(`${s.truck}${s.truck_model ? ` ${s.truck_model}` : ''}`)}` : null,
+      s.started_at ? `Started ${discordTime(s.started_at, 'f')}${s.ended_at ? `, delivered ${discordTime(s.ended_at, 'f')}` : ''}` : null,
+      s.mods && s.mods.length > 0 ? `Mods: ${s.mods.map(escapeMarkdown).join(', ')}` : null,
+    ].filter(Boolean);
+    fields.push({ name: `Submitted by hand${units}`, value: (lines.join('\n') || '—').slice(0, 1024) });
+  }
+  if (job.custom_map) fields.push({ name: 'Custom map', value: job.hide_map ? 'Hidden from the public view' : 'Public in /job', inline: true });
+  return fields;
 }
 
 function num(v: unknown): number | null {

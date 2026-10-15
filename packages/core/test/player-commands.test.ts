@@ -15,10 +15,18 @@ const EPHEMERAL = 64;
 
 type Sent = { content?: string; flags?: number; embeds?: { title?: string; description?: string; fields?: { name: string; value: string }[]; image?: { url: string }; footer?: { text: string } }[]; components?: { components: { custom_id: string; label: string }[] }[] };
 
-function setup(opts: { connected?: boolean; renderFails?: boolean; truckersmp?: Record<number, string | null> } = {}) {
+function setup(opts: { connected?: boolean; renderFails?: boolean; routeStatus?: number; truckersmp?: Record<number, string | null> } = {}) {
   const server = new MockPlasmaTrackServer();
   const t = taskDeps();
-  if (opts.connected !== false) t.backend.api = new PlasmaTrackApi({ baseUrl: BASE_URL, token: BOT_TOKEN, fetch: server.fetch });
+  const fetch: typeof server.fetch = async (input, init) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (opts.routeStatus && url.endsWith('/route')) {
+      const body = { error: { code: 'not_implemented', message: 'not implemented', details: {} } };
+      return new Response(JSON.stringify(body), { status: opts.routeStatus, headers: { 'content-type': 'application/json' } });
+    }
+    return server.fetch(input, init);
+  };
+  if (opts.connected !== false) t.backend.api = new PlasmaTrackApi({ baseUrl: BASE_URL, token: BOT_TOKEN, fetch });
   const renders: unknown[] = [];
   t.deps.renderer = {
     renderRoute: async (req) => {
@@ -227,6 +235,15 @@ describe('/job', () => {
     expect(files.map((f) => f.name)).toEqual(['route.png']);
     expect(renders).toHaveLength(1);
     expect(JSON.stringify(renders[0])).not.toContain('start_at');
+  });
+
+  it('shows the details without a map while the server cannot draw routes (501)', async () => {
+    const { run, renders } = setup({ routeStatus: 501 });
+    const { sent, files } = await run(commandInteraction('job', { options: [opt('id', '7K2M9QXA')] }));
+    expect(sent!.embeds![0]!.title).toBe('Job 7K2M-9QXA · ETS2');
+    expect(sent!.embeds![0]!.image).toBeUndefined();
+    expect(files).toEqual([]);
+    expect(renders).toHaveLength(0);
   });
 
   it('still answers when the renderer is down, just without the map', async () => {

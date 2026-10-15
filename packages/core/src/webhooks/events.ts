@@ -30,6 +30,8 @@ export const jobNeedsReviewSchema = obj({
   held_points: z.number().nullable().optional(),
   reasons: z.array(reasonSchema).default([]),
   delivered_at: z.string().optional(),
+  /** `manual` for a job submitted through the bot. */
+  origin: z.string().optional(),
 });
 
 export const jobScoredSchema = obj({

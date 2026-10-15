@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import {
   CHART_PATH,
   chartRenderRequestSchema,
+  COMPRESS_MAX_INPUT_BYTES,
+  COMPRESS_PATH,
   ROUTE_PATH,
   routeRenderRequestSchema,
   SIGNATURE_HEADER,
@@ -10,6 +12,7 @@ import {
   type Logger,
 } from '@plasmatrack/core';
 import { renderChart } from './chart.ts';
+import { compressImage, UnsupportedImageError } from './image.ts';
 import { Limiter, QueueFullError } from './limiter.ts';
 import type { RouteRenderer } from './route.ts';
 
@@ -31,13 +34,13 @@ class HttpError extends Error {
   }
 }
 
-function readBody(req: IncomingMessage): Promise<Uint8Array<ArrayBuffer>> {
+function readBody(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<Uint8Array<ArrayBuffer>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         reject(new HttpError(413, 'request body too large'));
         req.destroy();
         return;
@@ -72,12 +75,12 @@ export function createRendererServer(deps: ServerDeps): Server {
       sendJson(res, 200, { ok: true, basemaps: { ets2: deps.routes.hasBasemap('ets2'), ats: deps.routes.hasBasemap('ats') } });
       return;
     }
-    if (req.method !== 'POST' || (path !== ROUTE_PATH && path !== CHART_PATH)) {
+    if (req.method !== 'POST' || (path !== ROUTE_PATH && path !== CHART_PATH && path !== COMPRESS_PATH)) {
       sendJson(res, 404, { error: 'not found' });
       return;
     }
 
-    const body = await readBody(req);
+    const body = await readBody(req, path === COMPRESS_PATH ? COMPRESS_MAX_INPUT_BYTES : MAX_BODY_BYTES);
     // Authenticate before parsing anything.
     const ok = await verifyRendererRequest(
       deps.key,
@@ -89,6 +92,21 @@ export function createRendererServer(deps: ServerDeps): Server {
       now(),
     );
     if (!ok) throw new HttpError(401, 'invalid or expired signature');
+
+    if (path === COMPRESS_PATH) {
+      const started = performance.now();
+      let webp: Uint8Array;
+      try {
+        webp = await deps.limiter.run(() => compressImage(body));
+      } catch (err) {
+        if (err instanceof UnsupportedImageError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      deps.logger.info('compressed', { in: body.length, out: webp.length, ms: Math.round(performance.now() - started) });
+      res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': String(webp.length), 'Cache-Control': 'no-store' });
+      res.end(webp);
+      return;
+    }
 
     let json: unknown;
     try {

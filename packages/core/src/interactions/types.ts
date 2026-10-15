@@ -9,8 +9,9 @@ import type {
 import type { PlasmaTrackApi } from '../api/client.ts';
 import type { OutgoingFile, OutgoingMessage } from '../discord/rest.ts';
 import type { Logger } from '../log.ts';
-import type { ImageRenderer } from '../render/client.ts';
-import type { Clock, NoticeKind, NoticeStore, TokenGrantStore } from '../ports.ts';
+import type { MediaFetcher } from '../media.ts';
+import type { ImageCompressor, ImageRenderer } from '../render/client.ts';
+import type { Clock, ManualDraftStore, NoticeKind, NoticeStore, TokenGrantStore } from '../ports.ts';
 import type { TruckersMpLookup } from '../truckersmp/client.ts';
 import type { WebhookEnvelope } from '../webhooks/events.ts';
 
@@ -124,6 +125,12 @@ export interface TaskDeps {
   clock: Clock;
   logger: Logger;
   renderer: ImageRenderer;
+  /** Shrinks evidence images before upload (the renderer). */
+  images: ImageCompressor;
+  /** Downloads Discord attachments and the server's signed image links. */
+  media: MediaFetcher;
+  /** Manual submissions being prepared. */
+  drafts: ManualDraftStore;
   /**
    * The PlasmaTrack backend of the server the interaction came from, or null
    * when that backend isn't connected yet. Resolved per interaction.

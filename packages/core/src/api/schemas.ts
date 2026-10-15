@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { SCALE_CLASSES } from '../render/protocol.ts';
 
-// Response shapes of the PlasmaTrack server API, v1 (docs/contract/, server
-// commit 9592355). Hand-written from the contract's examples until the server
-// publishes docs/openapi/bot-api.yaml; replace with generated types then.
+// Response shapes of the PlasmaTrack server API, v1 (docs/contract/). Hand-written
+// from the contract; test/contract-examples.test.ts checks them against the
+// server's real example responses.
 //
 // Contract rules applied everywhere (API_CONVENTIONS §1):
 // - unknown fields are ignored (every object is loose);
@@ -84,6 +84,14 @@ export type TokenMeta = z.infer<typeof tokenMetaSchema>;
 
 export const tokenRevokedSchema = obj({ revoked_token_id: z.string().nullable() });
 
+const scaleDistance = obj({
+  world_km: z.number(),
+  game_km: z.number(),
+  world_mi: z.number().optional(),
+  game_mi: z.number().optional(),
+});
+const distanceByScaleClass = z.partialRecord(z.enum(SCALE_CLASSES), scaleDistance);
+
 export const gameStatsSchema = obj({
   points: z.number(),
   job_count: z.number().int(),
@@ -92,6 +100,10 @@ export const gameStatsSchema = obj({
   game_km: z.number(),
   game_mi: z.number(),
   pending_review_count: z.number().int(),
+  /** Finished jobs per outcome (all seven keys). */
+  outcomes: z.record(z.string(), z.number().int()).optional(),
+  /** Totals of valid and approved jobs. */
+  distance_by_scale_class: distanceByScaleClass.optional(),
 });
 export type GameStats = z.infer<typeof gameStatsSchema>;
 
@@ -129,15 +141,20 @@ export const OUTCOMES = ['valid', 'approved', 'pending_review', 'invalid', 'reje
 export const outcomeSchema = openEnum(OUTCOMES);
 export type Outcome = z.infer<typeof outcomeSchema>;
 
+/** IDs are null on manual jobs: only names were typed. */
 const placeSchema = obj({
-  city_id: z.string(),
+  city_id: z.string().nullable(),
   city_name: z.string(),
-  company_id: z.string().optional(),
-  company_name: z.string().optional(),
+  company_id: z.string().nullable().optional(),
+  company_name: z.string().nullable().optional(),
 });
 
+export const ORIGINS = ['tracked', 'manual'] as const;
+/** `manual`: submitted through the bot (PUBLIC_API §6). Missing means tracked. */
+const originSchema = openEnum(ORIGINS).optional();
+
 export const multiplayerSchema = obj({
-  kind: openEnum(['singleplayer', 'truckersmp', 'convoy']),
+  kind: openEnum(['singleplayer', 'truckersmp', 'convoy', 'unknown']),
   truckersmp: obj({ server_id: z.number().int().nullable().optional(), account_id: z.number().int().nullable().optional() })
     .nullable()
     .optional(),
@@ -153,22 +170,19 @@ export const jobSummarySchema = obj({
   world_mi: z.number(),
   game_km: z.number(),
   game_mi: z.number(),
-  cargo: obj({ id: z.string(), name: z.string() }),
+  cargo: obj({ id: z.string().nullable(), name: z.string() }),
   source: placeSchema,
   destination: placeSchema,
-  market: z.string().optional(),
+  market: z.string().nullable().optional(),
   delivered_at: timestamp,
   reported_delivered_at: timestamp.optional(),
   multiplayer: multiplayerSchema.optional(),
+  origin: originSchema,
 });
 export type JobSummary = z.infer<typeof jobSummarySchema>;
 
-const scaleDistance = obj({
-  world_km: z.number(),
-  game_km: z.number(),
-  world_mi: z.number().optional(),
-  game_mi: z.number().optional(),
-});
+/** A signed image link, valid for an hour: fetch it when showing the job. */
+export const signedLinkSchema = obj({ url: z.string(), expires_at: timestamp });
 
 export const jobBonusSchema = obj({
   bonus_id: z.string(),
@@ -182,15 +196,81 @@ export const jobDetailSchema = jobSummarySchema.extend({
   planned_distance_km: nullableNumber.optional(),
   speed_penalty_applied: z.boolean().optional(),
   bonus: jobBonusSchema.nullable().optional(),
-  distance_by_scale_class: z.partialRecord(z.enum(SCALE_CLASSES), scaleDistance).optional(),
+  distance_by_scale_class: distanceByScaleClass.optional(),
   public_notes: z.array(obj({ code: z.string(), text: z.string() })).default([]),
+  /** A manual job's custom map; null when there is none or it was hidden. */
+  custom_map: signedLinkSchema.nullable().optional(),
 });
 export type JobDetail = z.infer<typeof jobDetailSchema>;
 
 // ---------------------------------------------------------------------------
+// Manual submissions (PUBLIC_API §6)
+
+export const EVIDENCE_ROLES = ['main', 'custom_map', 'uk_route', 'adjusted_scale'] as const;
+
+export const evidenceUploadSchema = obj({
+  evidence_id: z.string(),
+  content_type: z.string(),
+  size_bytes: z.number().int(),
+  expires_at: timestamp.optional(),
+});
+export type EvidenceUpload = z.infer<typeof evidenceUploadSchema>;
+
+export const evidenceItemSchema = obj({
+  evidence_id: z.string(),
+  role: openEnum(EVIDENCE_ROLES),
+  content_type: z.string(),
+  size_bytes: z.number().int().optional(),
+  url: z.string(),
+  expires_at: timestamp,
+});
+export type EvidenceItem = z.infer<typeof evidenceItemSchema>;
+
+export const jobEvidenceSchema = obj({ job_id: z.string(), items: z.array(evidenceItemSchema) });
+
+/** Effective values in canonical units (ADMIN_API §4). Fields a recording can't know are null. */
+export const sheetSchema = obj({
+  distance_km: nullableNumber.optional(),
+  distance_mi: nullableNumber.optional(),
+  map_scale: nullableNumber.optional(),
+  fuel_used_l: nullableNumber.optional(),
+  damage_pct: nullableNumber.optional(),
+  profit: nullableNumber.optional(),
+  started_at: timestamp.nullable().optional(),
+  ended_at: timestamp.nullable().optional(),
+  truck: z.string().nullable().optional(),
+  truck_model: z.string().nullable().optional(),
+  mods: z.array(z.string()).nullable().optional(),
+  cargo_name: z.string().nullable().optional(),
+  source_city: z.string().nullable().optional(),
+  source_company: z.string().nullable().optional(),
+  destination_city: z.string().nullable().optional(),
+  destination_company: z.string().nullable().optional(),
+  uk: obj({
+    distance_km: nullableNumber.optional(),
+    distance_mi: nullableNumber.optional(),
+    entry_city: z.string().nullable().optional(),
+    end_city: z.string().nullable().optional(),
+  })
+    .nullable()
+    .optional(),
+  adjusted_scale: obj({
+    distance_km: nullableNumber.optional(),
+    distance_mi: nullableNumber.optional(),
+    scale: nullableNumber.optional(),
+    entry_city: z.string().nullable().optional(),
+    exit_city: z.string().nullable().optional(),
+  })
+    .nullable()
+    .optional(),
+});
+export type Sheet = z.infer<typeof sheetSchema>;
+
+// ---------------------------------------------------------------------------
 // Route (PUBLIC_API §4, ADMIN_API §5)
 
-export const SEGMENT_KINDS = ['driving', 'ferry', 'train', 'teleport', 'gap'] as const;
+/** `ferry_or_train`: a crossing the game didn't name (server, 2026-10-15). */
+export const SEGMENT_KINDS = ['driving', 'ferry', 'train', 'ferry_or_train', 'teleport', 'gap'] as const;
 export const SEGMENT_STATUSES = ['kept', 'reverted', 'restored'] as const;
 
 const position = z.array(z.number()).min(2);
@@ -275,12 +355,13 @@ export const reviewQueueItemSchema = obj({
   held_points: nullableNumber.optional(),
   world_km: z.number().optional(),
   game_km: z.number().optional(),
-  cargo: obj({ id: z.string(), name: z.string() }).optional(),
-  source: obj({ city_id: z.string(), city_name: z.string() }).optional(),
-  destination: obj({ city_id: z.string(), city_name: z.string() }).optional(),
+  cargo: obj({ id: z.string().nullable(), name: z.string() }).optional(),
+  source: obj({ city_id: z.string().nullable(), city_name: z.string() }).optional(),
+  destination: obj({ city_id: z.string().nullable(), city_name: z.string() }).optional(),
   delivered_at: timestamp,
   age_s: z.number().optional(),
   reasons: z.array(reasonSchema).default([]),
+  origin: originSchema,
 });
 export type ReviewQueueItem = z.infer<typeof reviewQueueItemSchema>;
 
@@ -297,12 +378,21 @@ export const adminJobDetailSchema = jobDetailSchema.extend({
   start_kind: z.string().optional(),
   // The rest is shown to moderators mostly as-is; kept loose on purpose.
   distances: z.record(z.string(), z.unknown()).optional(),
-  speed: z.record(z.string(), z.unknown()).optional(),
+  // Null on manual jobs.
+  speed: z.record(z.string(), z.unknown()).nullable().optional(),
   fuel: z.record(z.string(), z.unknown()).optional(),
   rules: z.array(obj({ rule: z.string(), triggered: z.boolean() })).optional(),
-  integrity: z.record(z.string(), z.unknown()).optional(),
+  integrity: z.record(z.string(), z.unknown()).nullable().optional(),
   segments: z.array(obj({ status: z.string() })).optional(),
   timeline: z.array(obj({ at: timestamp, event: z.string() })).optional(),
+  // Stats sheet, edits and manual jobs (ADMIN_API §4, §14).
+  sheet: sheetSchema.nullable().optional(),
+  overrides: z.record(z.string(), z.unknown()).default({}),
+  submission: obj({ unit: z.string(), fuel_unit: z.string(), map_scale_defaulted: z.boolean().optional(), sheet: sheetSchema.optional() })
+    .nullable()
+    .optional(),
+  evidence: z.array(evidenceItemSchema).default([]),
+  hide_map: z.boolean().optional(),
 });
 export type AdminJobDetail = z.infer<typeof adminJobDetailSchema>;
 
@@ -347,6 +437,9 @@ export const decisionResultSchema = obj({
   etag: z.string(),
 });
 export type DecisionResult = z.infer<typeof decisionResultSchema>;
+
+export const jobEditResultSchema = decisionResultSchema.extend({ overrides: z.record(z.string(), z.unknown()).default({}) });
+export type JobEditResult = z.infer<typeof jobEditResultSchema>;
 
 const outcomeSnapshot = obj({ outcome: outcomeSchema, points: nullableNumber, held_points: nullableNumber.optional() });
 

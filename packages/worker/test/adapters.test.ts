@@ -4,7 +4,9 @@ import {
   CloudflareWorkQueue,
   D1DedupeStore,
   D1JobVersionStore,
+  D1ManualDraftStore,
   D1NoticeStore,
+  D1RateLimiter,
   D1ReviewPostStore,
   D1TokenGrantStore,
   R2BlobCache,
@@ -17,6 +19,39 @@ class Clock {
     return this.t;
   }
 }
+
+describe('D1RateLimiter', () => {
+  it('counts per key in fixed windows and purges old ones', async () => {
+    const clock = new Clock();
+    clock.t = 1_000_000_000_000;
+    const limiter = new D1RateLimiter(env.DB, 2, 20_000, clock);
+    expect(await limiter.allow('u1')).toBe(true);
+    expect(await limiter.allow('u1')).toBe(true);
+    expect(await limiter.allow('u1')).toBe(false);
+    expect(await limiter.allow('u2')).toBe(true);
+    clock.t += 20_000;
+    expect(await limiter.allow('u1')).toBe(true);
+    expect(await limiter.purgeOlderThan(clock.t)).toBe(2);
+  });
+});
+
+describe('D1ManualDraftStore', () => {
+  it('keeps one draft per player and backend, deletes only the current one, and expires', async () => {
+    const clock = new Clock();
+    const store = new D1ManualDraftStore(env.DB, clock);
+    const job = { game: 'ets2', unit: 'km', fuel_unit: 'l', distance: 380, evidence: ['evd_1'] } as never;
+    const draft = { id: 'd-1', backend: 'production', userId: USER_A, rev: 1, job, createdAt: clock.t, expiresAt: clock.t + 3_600_000 };
+    await store.put(draft);
+    await store.put({ ...draft, id: 'd-2', rev: 1 });
+    expect((await store.get('production', USER_A))!.id).toBe('d-2');
+    expect(await store.get('test', USER_A)).toBeNull();
+    expect(await store.delete('production', USER_A, 'd-1')).toBe(false);
+    expect((await store.get('production', USER_A))!.job).toEqual(job);
+    clock.t += 3_600_001;
+    expect(await store.get('production', USER_A)).toBeNull();
+    expect(await store.purgeExpired()).toBe(1);
+  });
+});
 
 describe('D1DedupeStore', () => {
   it('claims a key once, then again only after it expires', async () => {

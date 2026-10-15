@@ -13,6 +13,8 @@ export * from './interactions/tasks.ts';
 export * from './commands/registration.ts';
 export * from './render/protocol.ts';
 export * from './render/client.ts';
+export * from './media.ts';
+export * from './image-metadata.ts';
 export * from './api/ids.ts';
 export * from './api/schemas.ts';
 export * from './api/client.ts';

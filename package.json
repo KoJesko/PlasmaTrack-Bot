@@ -15,7 +15,9 @@
     "license-audit": "node scripts/license-audit.mjs",
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces",
-    "check": "npm run license-audit && npm run typecheck && npm test"
+    "check": "npm run secret-scan && npm run license-audit && npm run typecheck && npm test",
+    "secret-scan": "node scripts/secret-scan.mjs",
+    "sync-contract": "node scripts/sync-contract.mjs"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

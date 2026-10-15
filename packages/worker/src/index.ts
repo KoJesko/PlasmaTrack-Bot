@@ -2,10 +2,12 @@ import {
   ConfigError,
   createLogger,
   demoApi,
+  describeQueueMessage,
   RendererClient,
   DiscordRest,
   handleInteraction,
   handlers,
+  HttpMediaFetcher,
   parseBotConfig,
   PlasmaTrackApi,
   processQueueMessage,
@@ -28,13 +30,22 @@ import {
   CloudflareWorkQueue,
   D1DedupeStore,
   D1JobVersionStore,
+  D1ManualDraftStore,
   D1NoticeStore,
+  D1RateLimiter,
   D1ReviewPostStore,
   D1TokenGrantStore,
   R2BlobCache,
 } from './adapters.ts';
 
 export const WEBHOOK_PATH = '/webhooks/plasmatrack';
+/** Must match `max_retries` of the work queue's consumer in wrangler.toml. */
+const MAX_RETRIES = 5;
+/** Messages that used up their retries land in a queue with this suffix (`dead_letter_queue`). */
+const DEAD_LETTER_SUFFIX = '-dlq';
+/** Slash commands per user: at most this many per window (the owner's rule: 5 per 20 s). */
+const COMMAND_LIMIT = 5;
+const COMMAND_WINDOW_MS = 20_000;
 /** Job versions are kept a week: longer than the server's 72 h retry window. */
 const JOB_VERSION_RETENTION_MS = 7 * 24 * 3600_000;
 import type { Env } from './env.ts';
@@ -73,16 +84,23 @@ function runtime(env: Env): Runtime {
 }
 
 function consumerDeps(env: Env, rt: Runtime): ConsumerDeps {
+  const renderer = new RendererClient({
+    baseUrl: rt.config.RENDERER_URL,
+    key: rt.config.RENDERER_KEY,
+    cache: new R2BlobCache(env.RENDER_CACHE),
+  });
   return {
     discord: new DiscordRest({ applicationId: rt.config.DISCORD_APPLICATION_ID, botToken: rt.config.DISCORD_BOT_TOKEN }),
     notices: new D1NoticeStore(env.DB),
     clock: systemClock,
     logger: rt.logger,
-    renderer: new RendererClient({
-      baseUrl: rt.config.RENDERER_URL,
-      key: rt.config.RENDERER_KEY,
-      cache: new R2BlobCache(env.RENDER_CACHE),
+    renderer,
+    images: renderer,
+    // Evidence links point at the PlasmaTrack servers themselves.
+    media: new HttpMediaFetcher({
+      extraHosts: () => Object.values(rt.config.BACKENDS).flatMap((b) => (b.apiUrl ? [new URL(b.apiUrl).hostname] : [])),
     }),
+    drafts: new D1ManualDraftStore(env.DB),
     backends: {
       forGuild: (guildId) => {
         const guild = guildId ? rt.config.GUILDS[guildId] : undefined;
@@ -149,6 +167,7 @@ async function handleInteractionRequest(request: Request, env: Env, ctx: Executi
     queue,
     logger: rt.logger,
     clock: systemClock,
+    limiter: new D1RateLimiter(env.DB, COMMAND_LIMIT, COMMAND_WINDOW_MS),
   });
   if (background.length > 0) {
     ctx.waitUntil(
@@ -173,22 +192,39 @@ export default {
 
     const { pathname } = new URL(request.url);
     if (pathname === '/healthz' && request.method === 'GET') return new Response('ok');
-    if (pathname === '/interactions' && request.method === 'POST') {
-      return handleInteractionRequest(request, env, ctx, rt);
+    try {
+      if (pathname === '/interactions' && request.method === 'POST') {
+        return await handleInteractionRequest(request, env, ctx, rt);
+      }
+      if (pathname === WEBHOOK_PATH && request.method === 'POST') return await handleWebhookRequest(request, env, rt);
+    } catch (err) {
+      rt.logger.error('request failed', { path: pathname, err });
+      return new Response('internal error', { status: 500 });
     }
-    if (pathname === WEBHOOK_PATH && request.method === 'POST') return handleWebhookRequest(request, env, rt);
     return new Response('not found', { status: 404 });
   },
 
   async queue(batch, env, _ctx) {
     const rt = runtime(env);
+    if (batch.queue.endsWith(DEAD_LETTER_SUFFIX)) {
+      // Out of retries. Record what was lost (no tokens or bodies) and let it go:
+      // interaction tokens are long expired, and webhooks are the server's to resend.
+      for (const message of batch.messages) {
+        rt.logger.error('message dead-lettered', { ...describeQueueMessage(message.body), attempts: message.attempts });
+        message.ack();
+      }
+      return;
+    }
     const deps = consumerDeps(env, rt);
     // Messages are independent; run them side by side so one slow render
     // doesn't hold up the others in the batch.
     await Promise.all(
       batch.messages.map(async (message) => {
         try {
-          const result = await processQueueMessage(message.body, tasks, deps);
+          const result = await processQueueMessage(message.body, tasks, deps, {
+            attempt: message.attempts,
+            maxAttempts: MAX_RETRIES + 1,
+          });
           if (result.status === 'retry') message.retry({ delaySeconds: result.delaySeconds });
           else message.ack();
         } catch (err) {
@@ -207,7 +243,11 @@ export default {
         new D1NoticeStore(env.DB).purgeExpired(),
         new D1JobVersionStore(env.DB).purgeOlderThan(Date.now() - JOB_VERSION_RETENTION_MS),
         new D1TokenGrantStore(env.DB).purgeExpired(),
-      ]).then(([dedupe, notices, jobVersions, grants]) => rt.logger.info('purged expired rows', { dedupe, notices, jobVersions, grants })),
+        new D1RateLimiter(env.DB, COMMAND_LIMIT, COMMAND_WINDOW_MS).purgeOlderThan(Date.now()),
+        new D1ManualDraftStore(env.DB).purgeExpired(),
+      ]).then(([dedupe, notices, jobVersions, grants, rateLimits, drafts]) =>
+        rt.logger.info('purged expired rows', { dedupe, notices, jobVersions, grants, rateLimits, drafts }),
+      ),
     );
   },
 } satisfies ExportedHandler<Env, QueueMessage>;

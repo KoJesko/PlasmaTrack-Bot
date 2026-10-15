@@ -4,8 +4,11 @@ import type {
   Clock,
   DedupeStore,
   JobVersionStore,
+  ManualDraft,
+  ManualDraftStore,
   Notice,
   NoticeStore,
+  RateLimiter,
   ReviewPost,
   ReviewPostStore,
   TokenGrant,
@@ -13,6 +16,67 @@ import type {
   WorkQueue,
 } from './ports.ts';
 import { systemClock } from './ports.ts';
+
+export class MemoryManualDraftStore implements ManualDraftStore {
+  readonly drafts = new Map<string, ManualDraft>();
+  private readonly clock: Clock;
+
+  constructor(clock: Clock = systemClock) {
+    this.clock = clock;
+  }
+
+  async get(backend: string, userId: string): Promise<ManualDraft | null> {
+    const d = this.drafts.get(`${backend}|${userId}`);
+    return d && d.expiresAt > this.clock.now() ? structuredClone(d) : null;
+  }
+
+  async put(draft: ManualDraft): Promise<void> {
+    this.drafts.set(`${draft.backend}|${draft.userId}`, structuredClone(draft));
+  }
+
+  async delete(backend: string, userId: string, id: string): Promise<boolean> {
+    const key = `${backend}|${userId}`;
+    if (this.drafts.get(key)?.id !== id) return false;
+    this.drafts.delete(key);
+    return true;
+  }
+
+  async purgeExpired(): Promise<number> {
+    let n = 0;
+    for (const [k, d] of this.drafts) {
+      if (d.expiresAt <= this.clock.now()) {
+        this.drafts.delete(k);
+        n++;
+      }
+    }
+    return n;
+  }
+}
+
+/** Fixed-window limiter: `limit` uses per key in each `periodMs` window. */
+export class MemoryRateLimiter implements RateLimiter {
+  private readonly windows = new Map<string, { start: number; count: number }>();
+  private readonly limit: number;
+  private readonly periodMs: number;
+  private readonly clock: Clock;
+
+  constructor(limit: number, periodMs: number, clock: Clock = systemClock) {
+    this.limit = limit;
+    this.periodMs = periodMs;
+    this.clock = clock;
+  }
+
+  async allow(key: string): Promise<boolean> {
+    const now = this.clock.now();
+    const w = this.windows.get(key);
+    if (!w || now - w.start >= this.periodMs) {
+      this.windows.set(key, { start: now, count: 1 });
+      return this.limit >= 1;
+    }
+    w.count++;
+    return w.count <= this.limit;
+  }
+}
 
 export class MemoryWorkQueue<T> implements WorkQueue<T> {
   readonly items: { item: T; delaySeconds?: number }[] = [];

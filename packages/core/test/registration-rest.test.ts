@@ -16,9 +16,16 @@ describe('buildCommandRegistration', () => {
 
   it('registers every command per server; moderator commands hidden by default', () => {
     expect(reg.guild.map((c) => c.name).sort()).toEqual(
-      ['about', 'admins', 'audit', 'bonus', 'config', 'job', 'jobs', 'leaderboard', 'name', 'notices', 'player', 'profile', 'recalc', 'release', 'review', 'revocation', 'tmpflags', 'token'],
+      [
+        'about', 'admins', 'approve-manual', 'audit', 'bonus', 'config', 'decline-manual', 'edit-job', 'history', 'job', 'jobs',
+        'leaderboard', 'name', 'notices', 'player', 'post-approve', 'post-decline', 'profile', 'recalc', 'release', 'review',
+        'revocation', 'stats', 'submit', 'tmpflags', 'token',
+      ],
     );
-    expect([...moderator].sort()).toEqual(['admins', 'audit', 'bonus', 'config', 'player', 'recalc', 'release', 'review', 'revocation', 'tmpflags']);
+    expect([...moderator].sort()).toEqual([
+      'admins', 'approve-manual', 'audit', 'bonus', 'config', 'decline-manual', 'edit-job', 'player', 'post-approve', 'post-decline',
+      'recalc', 'release', 'review', 'revocation', 'tmpflags',
+    ]);
     for (const c of reg.guild) {
       expect('contexts' in c).toBe(false);
       expect(c.default_member_permissions).toBe(moderator.has(c.name) ? '0' : undefined);
@@ -38,6 +45,13 @@ describe('buildCommandRegistration', () => {
     };
     for (const c of reg.guild) walk(c as never, c.name);
     expect(reg.guild.length).toBeLessThanOrEqual(100);
+    // Discord caps the names, descriptions and choice values of one command at 8000 characters.
+    const size = (o: Record<string, unknown>): number =>
+      String(o['name'] ?? '').length +
+      String(o['description'] ?? '').length +
+      ((o['choices'] as { name: string; value: unknown }[] | undefined) ?? []).reduce((n, c) => n + c.name.length + String(c.value).length, 0) +
+      ((o['options'] as Record<string, unknown>[] | undefined) ?? []).reduce((n, x) => n + size(x), 0);
+    for (const c of reg.guild) expect(size(c as never), c.name).toBeLessThanOrEqual(8000);
   });
 
   it('rejects duplicate names', () => {

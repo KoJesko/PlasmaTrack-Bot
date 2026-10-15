@@ -11,7 +11,7 @@ import {
 } from '../discord/constants.ts';
 import type { GuildSettings } from '../config.ts';
 import type { Logger } from '../log.ts';
-import type { Clock, WorkQueue } from '../ports.ts';
+import type { Clock, RateLimiter, WorkQueue } from '../ports.ts';
 import type { OutgoingMessage } from '../discord/rest.ts';
 import type {
   Access,
@@ -29,8 +29,12 @@ export interface RouterDeps {
   queue: WorkQueue<QueueMessage>;
   logger: Logger;
   clock: Clock;
-  /** Upper bound on the only await in the response path. Keeps us inside Discord's 3 s. */
+  /** Upper bound on the enqueue in the response path. Keeps us inside Discord's 3 s. */
   enqueueTimeoutMs?: number;
+  /** Per-user budget for slash commands (all users; buttons and forms don't count). */
+  limiter?: RateLimiter;
+  /** Upper bound on the limiter check; when it is slow or down, the user goes ahead. */
+  limiterTimeoutMs?: number;
 }
 
 export interface RouterResult {
@@ -43,6 +47,10 @@ export const NOT_ALLOWED = 'You need a moderator role to use this.';
 export const NOT_MEMBER = 'PlasmaTrack isn’t open to your roles here. Ask a moderator if you think you should have access.';
 export const NOT_HERE = 'PlasmaTrack commands only work in its Discord servers.';
 export const START_FAILED = 'Sorry, that could not be started. Please try again in a moment.';
+export const RATE_LIMITED = 'You’re going a bit fast. Please wait a few seconds and try again.';
+
+/** The interaction ID is in every related log line, so users can quote it. */
+export const withReference = (text: string, interactionId: string) => `${text} (Reference: ${interactionId})`;
 
 export async function handleInteraction(interaction: APIInteraction, deps: RouterDeps): Promise<RouterResult> {
   if (interaction.type === InteractionType.Ping) {
@@ -104,12 +112,25 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
     if (access === 'member' && !isMember(interaction, guild)) return reply(ephemeralText(NOT_MEMBER));
   }
 
+  if (isCommand && deps.limiter) {
+    let allowed = true;
+    try {
+      allowed = await withTimeout(deps.limiter.allow(userId), deps.limiterTimeoutMs ?? 500);
+    } catch (err) {
+      deps.logger.warn('rate limiter unavailable; allowing', { err });
+    }
+    if (!allowed) {
+      deps.logger.info('rate limited', { userId, interactionId: interaction.id });
+      return reply(ephemeralText(RATE_LIMITED));
+    }
+  }
+
   let result: HandlerResult;
   try {
     result = run();
   } catch (err) {
     deps.logger.error('handler threw', { err, interactionId: interaction.id });
-    return reply(ephemeralText('Something went wrong handling that.'));
+    return reply(ephemeralText(withReference('Something went wrong handling that.', interaction.id)));
   }
 
   // Notices belong to a server's backend, so the hint only makes sense inside a configured server.
@@ -141,8 +162,8 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
       try {
         await withTimeout(deps.queue.send(message), deps.enqueueTimeoutMs ?? 2000);
       } catch (err) {
-        deps.logger.error('enqueue failed', { err, task: result.task.name });
-        return reply(ephemeralText(START_FAILED));
+        deps.logger.error('enqueue failed', { err, task: result.task.name, interactionId: interaction.id });
+        return reply(ephemeralText(withReference(START_FAILED, interaction.id)));
       }
       const response: APIInteractionResponse =
         result.kind === 'defer'

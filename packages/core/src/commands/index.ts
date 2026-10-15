@@ -1,5 +1,6 @@
 import type { InteractionHandlers, TaskDefinition } from '../interactions/types.ts';
 import { aboutCommand } from './about.ts';
+import { historyCommand, historyComponent, historyTask, statsCommand, statsTask } from './history.ts';
 import { jobCommand, jobTask } from './job.ts';
 import {
   jobsCommand,
@@ -20,10 +21,29 @@ import {
   tmpflagsCommand,
 } from './mod/manage.ts';
 import { bonusCommand, opsTasks, recalcCommand, recalcComponents, recalcModals } from './mod/ops.ts';
+import {
+  approveManualCommand,
+  declineManualCommand,
+  editJobCommand,
+  editJobTask,
+  manualDecideTask,
+  postApproveCommand,
+  postDeclineCommand,
+} from './mod/manual.ts';
 import { grantComponent, playerCommand, playerTasks } from './mod/player.ts';
 import { reviewCommand, reviewComponents, reviewModals, reviewTasks } from './mod/review.ts';
 import { noticesCommand, noticesTask } from './notices.ts';
 import { profileCommand, profileTask } from './profile.ts';
+import {
+  evidenceComponent,
+  jobEvidenceTask,
+  submitAdjustedTask,
+  submitCancelTask,
+  submitCommand,
+  submitComponent,
+  submitPrepareTask,
+  submitSendTask,
+} from './submit.ts';
 import {
   nameCommand,
   nameTask,
@@ -44,6 +64,9 @@ export const handlers: InteractionHandlers = {
     jobCommand,
     jobsCommand,
     leaderboardCommand,
+    statsCommand,
+    historyCommand,
+    submitCommand,
     // Moderators
     reviewCommand,
     recalcCommand,
@@ -55,11 +78,19 @@ export const handlers: InteractionHandlers = {
     adminsCommand,
     auditCommand,
     tmpflagsCommand,
+    approveManualCommand,
+    declineManualCommand,
+    postApproveCommand,
+    postDeclineCommand,
+    editJobCommand,
   ],
   components: [
     ...tokenComponents,
     jobsComponent,
     leaderboardComponent,
+    historyComponent,
+    submitComponent,
+    evidenceComponent,
     grantComponent,
     ...reviewComponents,
     ...recalcComponents,
@@ -78,8 +109,17 @@ export const tasks: TaskDefinition[] = [
   jobTask,
   jobsTask,
   leaderboardTask,
+  statsTask,
+  historyTask,
+  submitPrepareTask,
+  submitAdjustedTask,
+  submitSendTask,
+  submitCancelTask,
+  jobEvidenceTask,
   ...reviewTasks,
   ...opsTasks,
   ...playerTasks,
   manageTask,
+  manualDecideTask,
+  editJobTask,
 ];

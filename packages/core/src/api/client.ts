@@ -8,8 +8,11 @@ import {
   configVersionSchema,
   decisionResultSchema,
   errorBodySchema,
+  evidenceUploadSchema,
   gameStatsResponseSchema,
   jobDetailSchema,
+  jobEditResultSchema,
+  jobEvidenceSchema,
   jobSummarySchema,
   leaderboardSchema,
   operationSchema,
@@ -69,9 +72,9 @@ export class ApiError extends Error {
     this.retryAfterSeconds = retryAfterSeconds;
   }
 
-  /** Network failures, timeouts, 429 and 5xx are worth retrying. */
+  /** Network failures, timeouts, 429 and 5xx are worth retrying; 501 never changes on retry. */
   get retryable(): boolean {
-    return this.status === 0 || this.status === 429 || this.status >= 500;
+    return this.status === 0 || this.status === 429 || (this.status >= 500 && this.status !== 501);
   }
 }
 
@@ -116,6 +119,8 @@ type Query = Record<string, string | number | boolean | null | undefined>;
 interface RequestOptions {
   query?: Query;
   body?: unknown;
+  /** A non-JSON body (evidence images). */
+  raw?: { bytes: Uint8Array<ArrayBuffer>; contentType: string };
   idempotencyKey?: string;
   actor?: string;
 }
@@ -162,6 +167,26 @@ export class PlasmaTrackApi {
   }
 
   // -------------------------------------------------------------------------
+  // Manual submissions (PUBLIC_API §6), on behalf of the player who ran the command.
+
+  /** One image (WebP, PNG or JPEG, at most 5 MB). Unused uploads expire after 24 h. */
+  uploadEvidence(discordId: string, bytes: Uint8Array<ArrayBuffer>, contentType: string, key: string) {
+    return this.request('POST', `/players/${discordId}/evidence`, evidenceUploadSchema, {
+      raw: { bytes, contentType },
+      idempotencyKey: key,
+    });
+  }
+
+  submitManualJob(discordId: string, job: ManualJobInput, key: string) {
+    return this.request('POST', `/players/${discordId}/manual-jobs`, jobDetailSchema, { body: job, idempotencyKey: key });
+  }
+
+  /** The submitter's own images (404 for anyone else). Links are valid for an hour. */
+  getOwnJobEvidence(discordId: string, jobId: string) {
+    return this.request('GET', `/players/${discordId}/jobs/${jobId}/evidence`, jobEvidenceSchema);
+  }
+
+  // -------------------------------------------------------------------------
   // Public reads (PUBLIC_API §2–5)
 
   getPlayer(discordId: string) {
@@ -174,6 +199,13 @@ export class PlasmaTrackApi {
 
   listPlayerJobs(game: Game, discordId: string, options: ListOptions & { outcome?: readonly string[] } = {}) {
     return this.request('GET', `/public/${game}/players/${discordId}/jobs`, pageSchema(jobSummarySchema), {
+      query: { ...listQuery(options), outcome: options.outcome?.join(',') },
+    });
+  }
+
+  /** A player's whole history, both games, newest first. */
+  listAllPlayerJobs(discordId: string, options: ListOptions & { outcome?: readonly string[] } = {}) {
+    return this.request('GET', `/public/players/${discordId}/jobs`, pageSchema(jobSummarySchema), {
       query: { ...listQuery(options), outcome: options.outcome?.join(',') },
     });
   }
@@ -229,6 +261,7 @@ export class PlasmaTrackApi {
       Accept: 'application/json',
     };
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+    if (options.raw) headers['Content-Type'] = options.raw.contentType;
     if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
     if (options.actor) headers['X-PlasmaTrack-Actor'] = options.actor;
 
@@ -240,7 +273,7 @@ export class PlasmaTrackApi {
       res = await this.fetchFn(url.toString(), {
         method,
         headers,
-        ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+        ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : options.raw ? { body: options.raw.bytes } : {}),
         signal: controller.signal,
       });
     } catch (err) {
@@ -335,8 +368,23 @@ export class AdminApi {
   }
 
   // §7 Decisions
-  decide(jobId: string, decision: Decision, meta: WriteMeta & { expectedEtag?: string }) {
+  /** `hideMap` and `corrections` are for approvals only (applied in the same step). */
+  decide(
+    jobId: string,
+    decision: Decision,
+    meta: WriteMeta & { expectedEtag?: string; hideMap?: boolean; corrections?: JobEdit },
+  ) {
     return this.write('POST', `/jobs/${jobId}/${decision}`, decisionResultSchema, meta, {
+      ...(meta.expectedEtag ? { expected_etag: meta.expectedEtag } : {}),
+      ...(meta.hideMap !== undefined ? { hide_map: meta.hideMap } : {}),
+      ...(meta.corrections && Object.keys(meta.corrections).length > 0 ? { corrections: meta.corrections } : {}),
+    });
+  }
+
+  // §14 Edits: stored as overrides that survive re-scoring.
+  editJob(jobId: string, changes: JobEdit, meta: WriteMeta & { expectedEtag?: string }) {
+    return this.write('PATCH', `/jobs/${jobId}`, jobEditResultSchema, meta, {
+      ...changes,
       ...(meta.expectedEtag ? { expected_etag: meta.expectedEtag } : {}),
     });
   }
@@ -476,6 +524,67 @@ export interface BonusInput {
   amount: number;
   active_from: string;
   active_to: string;
+}
+
+export type DistanceUnit = 'mi' | 'km';
+export type FuelUnit = 'l' | 'us_gal' | 'uk_gal';
+
+/** PUBLIC_API §6. Image fields hold evidence IDs from `uploadEvidence`. */
+export interface ManualJobInput {
+  game: Game;
+  /** For every distance in the body. */
+  unit: DistanceUnit;
+  fuel_unit: FuelUnit;
+  start_city: string;
+  start_company: string;
+  end_city: string;
+  end_company: string;
+  cargo_name: string;
+  /** What the game logged (game distance). */
+  distance: number;
+  fuel_used: number;
+  /** Percent, 0–100. */
+  damage: number;
+  /** In the game's currency. */
+  profit: number;
+  started_at: string;
+  ended_at: string;
+  truck: string;
+  truck_model?: string;
+  mod_names?: string[];
+  /** Server default: ATS 20, ETS2 19. */
+  map_scale?: number;
+  uk?: { distance: number; entry_city: string; end_city: string; route_evidence: string };
+  adjusted_scale?: { entry_city: string; exit_city: string; distance: number; scale: number; evidence: string };
+  evidence: string[];
+  custom_map?: string;
+}
+
+/**
+ * ADMIN_API §14: any field of any job. `null` clears damage, profit, fuel_used,
+ * truck, truck_model, mod_names, map_scale, uk, adjusted_scale and bonus_id.
+ */
+export interface JobEdit {
+  unit?: DistanceUnit;
+  fuel_unit?: FuelUnit;
+  start_city?: string;
+  start_company?: string;
+  end_city?: string;
+  end_company?: string;
+  cargo_name?: string;
+  distance?: number;
+  fuel_used?: number | null;
+  damage?: number | null;
+  profit?: number | null;
+  started_at?: string;
+  ended_at?: string;
+  truck?: string | null;
+  truck_model?: string | null;
+  mod_names?: string[] | null;
+  map_scale?: number | null;
+  uk?: { distance?: number; entry_city?: string; end_city?: string } | null;
+  adjusted_scale?: { entry_city?: string; exit_city?: string; distance?: number; scale?: number } | null;
+  bonus_id?: string | null;
 }
 
 export interface ReleaseInput {

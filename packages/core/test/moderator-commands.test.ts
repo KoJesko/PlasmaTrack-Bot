@@ -230,7 +230,7 @@ describe('/bonus', () => {
 
 describe('/player', () => {
   it('a moderator-issued token is sent to the player as a button; the moderator never sees it', async () => {
-    const { run, discord, grants, server } = setup();
+    const { run, discord, grants, server, lines, queue } = setup();
     const issued = await run(commandInteraction('player', mod({ options: [group('token', 'issue', [opt('user', OTHER_ID, 6), opt('reason', 'Asked in #support')])] })));
     expect(issued.sent!.content).toContain('Sent <@234567890123456789> a button');
     expect(JSON.stringify(issued.sent)).not.toMatch(/pt_live_/);
@@ -249,6 +249,10 @@ describe('/player', () => {
     const got = await run(buttonInteraction(button, { guild: false, user: OTHER_ID, id: id() }));
     expect(got.sent!.flags).toBe(EPHEMERAL);
     expect(got.sent!.content).toMatch(/pt_live_mock_tok_\d+_plaintext/);
+    // Never logged or queued.
+    const token = /pt_live_mock_tok_\d+_plaintext/.exec(got.sent!.content!)![0];
+    expect(lines.some((l) => l.line.includes(token))).toBe(false);
+    expect(JSON.stringify(queue.items)).not.toContain(token);
     expect(server.audit.at(-1)).toMatchObject({ action: 'token.issue', actor: { discord_user_id: ADMIN_ID }, reason: 'Asked in #support' });
     expect([...grants.grants.values()][0]!.usedAt).not.toBeNull();
 

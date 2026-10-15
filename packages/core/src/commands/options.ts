@@ -52,14 +52,14 @@ export function numberOption(i: APIChatInputApplicationCommandInteraction, name:
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
 
-/** An uploaded file: Discord's CDN URL, size and name (from `resolved.attachments`). */
+/** An uploaded file: Discord's CDN URL, size, name and type (from `resolved.attachments`). */
 export function attachmentOption(
   i: APIChatInputApplicationCommandInteraction,
   name: string,
-): { url: string; size: number; filename: string } | undefined {
+): { url: string; size: number; filename: string; contentType: string | undefined } | undefined {
   const id = raw(i, name);
   const a = typeof id === 'string' ? i.data.resolved?.attachments?.[id] : undefined;
-  return a ? { url: a.url, size: a.size, filename: a.filename } : undefined;
+  return a ? { url: a.url, size: a.size, filename: a.filename, contentType: a.content_type?.split(';')[0]?.trim() } : undefined;
 }
 
 /** A user option's ID (Discord validates it and includes the user in `resolved`). */

@@ -44,7 +44,7 @@ function header(job: { job_id: string; game: string; player: { discord_user_id: 
 export function needsReviewPost(job: NeedsReview): OutgoingMessage {
   const h = header(job);
   const embed: APIEmbed = {
-    title: h.title,
+    title: job.origin === 'manual' ? `${h.title} · submitted by hand` : h.title,
     color: job.outcome === 'invalid' ? 0xd62828 : 0xf2a33a,
     description: [
       `**${label(job.outcome)}**${job.held_points !== null && job.held_points !== undefined ? ` · ${job.held_points} points held` : ''}`,

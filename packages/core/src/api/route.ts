@@ -12,6 +12,16 @@ export interface RouteImageOptions {
   height?: number;
 }
 
+/**
+ * The renderer draws ferries and trains alike ("Ferry or train"), so an
+ * unnamed crossing is sent as a ferry. Unknown kinds stay as they are and are
+ * drawn as missing data.
+ */
+function segmentForRenderer(segment: string | undefined): string {
+  if (segment === undefined) return 'driving';
+  return segment === 'ferry_or_train' ? 'ferry' : segment;
+}
+
 export function toRouteRenderRequest(route: ServerRoute, options: RouteImageOptions = {}): RouteRenderRequest {
   const features = route.features
     .filter((f) => f.geometry.coordinates.length >= 2)
@@ -23,7 +33,7 @@ export function toRouteRenderRequest(route: ServerRoute, options: RouteImageOpti
       },
       properties: {
         scale_class: f.properties.scale_class ?? 'unknown',
-        segment: f.properties.segment ?? 'driving',
+        segment: segmentForRenderer(f.properties.segment),
         counted: f.properties.counted ?? true,
         status: f.properties.status ?? 'kept',
       },

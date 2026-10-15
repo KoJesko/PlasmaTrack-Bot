@@ -34,6 +34,18 @@ On the host of your choice:
 - Sizing: a small test render took about 0.2 s on the development PC; real basemaps will be slower. Start with
   `RENDER_CONCURRENCY=2`.
 
+**Or with Docker** (`packages/renderer/Dockerfile`, Ubuntu 24.04 with a virtual display for
+MapLibre Native). Build it from the repository root:
+
+    docker build -f packages/renderer/Dockerfile -t plasmatrack-renderer .
+    docker run -d --name plasmatrack-renderer --restart unless-stopped \
+      -e RENDERER_KEY=<the shared key> -p 127.0.0.1:8788:8788 \
+      -v /srv/plasmatrack/tiles:/tiles:ro plasmatrack-renderer
+
+The image expects `/tiles/ets2.pmtiles` and `/tiles/ats.pmtiles`, and has a health check on
+`/healthz`. Put the same TLS reverse proxy in front of it. The image hasn't been built or run
+yet; headless Linux rendering is unverified (docs/BUILD.md).
+
 ## 3. Cloudflare resources
 
 Run these from the `packages/worker` folder (one command per line; works in PowerShell and POSIX shells):
@@ -43,6 +55,7 @@ Run these from the `packages/worker` folder (one command per line; works in Powe
     npx wrangler login
     npx wrangler d1 create plasmatrack-bot                 # prints the database_id
     npx wrangler queues create plasmatrack-work
+    npx wrangler queues create plasmatrack-work-dlq      # messages that failed every try
     npx wrangler r2 bucket create plasmatrack-render-cache
 
 Now edit `wrangler.toml`: paste the `database_id`, and fill in every `[vars]` value from step 1.
@@ -96,7 +109,8 @@ e.g. `PRODUCTION` or `TEST`.
    4. **To rotate:** put both secrets on each side, comma-separated on the bot. Once the
       server signs with the new one, remove the old one from both.
 3. **Migrations:** apply them (`0002` orders webhook events, `0003` keeps notices per backend,
-   `0004` stores moderator-issued token grants and review posts):
+   `0004` stores moderator-issued token grants and review posts, `0005` counts slash commands
+   for the rate limit, `0006` keeps `/submit` drafts):
 
        npx wrangler d1 migrations apply plasmatrack-bot --remote
 
@@ -105,13 +119,14 @@ e.g. `PRODUCTION` or `TEST`.
    setup adds the first admins; `/admins add` adds more.
 
 The Worker validates its configuration on every request. If anything is missing or still a
-placeholder, it answers 500 and logs the names of the bad keys (never their values). Watch
-the logs with `npx wrangler tail`.
+placeholder, it answers 500 and logs the names of the bad keys (never their values).
+`[observability]` in `wrangler.toml` keeps the logs in the dashboard (Workers → Logs); watch
+them live with `npx wrangler tail`.
 
 - Add an **R2 lifecycle rule** on `plasmatrack-render-cache` (e.g. delete objects after 30
   days). Images are content-addressed, so expiry only costs a re-render.
-- Optionally add a dead-letter queue (`dead_letter_queue` in `wrangler.toml`) to keep messages
-  that failed all retries.
+- Messages that fail every retry go to `plasmatrack-work-dlq`. The same Worker consumes it,
+  logs what was lost (kind and IDs only) and drops it.
 - Check Cloudflare's current Queues, D1 and R2 limits for your plan before going live.
 
 ## 4. Connect Discord to the Worker
@@ -148,6 +163,6 @@ style change.
 Only `packages/worker` depends on Cloudflare. A different host needs:
 - an HTTP entry point that calls `handleInteraction`;
 - a queue consumer that calls `processQueueMessage`;
-- implementations of the four ports in `packages/core/src/ports.ts`: `WorkQueue`,
-  `DedupeStore`, `NoticeStore` and `BlobCache` (`packages/core/src/memory.ts` shows the
-  contract).
+- implementations of the ports in `packages/core/src/ports.ts`: `WorkQueue`,
+  `DedupeStore`, `JobVersionStore`, `NoticeStore`, `BlobCache`, `TokenGrantStore`,
+  `ReviewPostStore` and `RateLimiter` (`packages/core/src/memory.ts` shows the contract).

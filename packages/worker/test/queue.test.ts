@@ -29,6 +29,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('dead-letter queue', () => {
+  it('logs what was lost without tokens, and acks', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const batch = createMessageBatch<QueueMessage>('plasmatrack-work-test-dlq', [
+      { id: 'd0', timestamp: new Date(), attempts: 1, body: taskMessage('job.show') },
+    ]);
+    const ctx = createExecutionContext();
+    await worker.queue(batch, env, ctx);
+    const result = await getQueueResult(batch, ctx);
+    expect(result.explicitAcks).toEqual(['d0']);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const logged = errors.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('message dead-lettered');
+    expect(logged).toContain('"task":"job.show"');
+    expect(logged).not.toContain(INTERACTION_TOKEN);
+  });
+});
+
 describe('queue consumer', () => {
   it('runs /notices: edits the deferred reply ephemerally and marks only that user’s notices read', async () => {
     const store = new D1NoticeStore(env.DB);

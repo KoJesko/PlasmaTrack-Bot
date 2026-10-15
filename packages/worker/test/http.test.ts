@@ -51,6 +51,18 @@ describe('HTTP entry point', () => {
     ]);
   });
 
+  it('allows 5 slash commands per user per 20 s, counted in D1', async () => {
+    const { testEnv, sent } = envWithRecordingQueue();
+    const user = '700000000000000077';
+    const replies: { type: number; data?: { content?: string } }[] = [];
+    for (let i = 0; i < 6; i++) replies.push(await (await call(await signedRequest(command('notices', { user })), testEnv)).json());
+    // Unless the 20 s window happened to roll over mid-test, the sixth is refused.
+    const refused = replies.filter((r) => r.data?.content?.includes('going a bit fast'));
+    expect(refused.length).toBeLessThanOrEqual(1);
+    expect(sent.length + refused.length).toBe(6);
+    expect(sent.length).toBeGreaterThanOrEqual(5);
+  });
+
   it('refuses commands in DMs and from members without a PlasmaTrack role', async () => {
     const { testEnv, sent } = envWithRecordingQueue();
     const dm = (await (await call(await signedRequest(command('notices', { dm: true })), testEnv)).json()) as { data: { content: string } };

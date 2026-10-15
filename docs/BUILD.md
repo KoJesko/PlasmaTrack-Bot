@@ -33,6 +33,7 @@ This runs, in order:
 
 | Step | Command |
 |---|---|
+| Secret scan (tracked files only; values never printed) | `npm run secret-scan` |
 | License audit (every installed package against the FOSS allowlist) | `npm run license-audit` |
 | Typecheck every package | `npm run typecheck` |
 | All tests | `npm test` |

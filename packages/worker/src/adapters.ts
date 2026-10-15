@@ -7,9 +7,12 @@ import type {
   Clock,
   DedupeStore,
   JobVersionStore,
+  ManualDraft,
+  ManualDraftStore,
   Notice,
   NoticeKind,
   NoticeStore,
+  RateLimiter,
   ReviewPost,
   ReviewPostStore,
   TokenGrant,
@@ -17,6 +20,92 @@ import type {
   WorkQueue,
 } from '@plasmatrack/core';
 import { systemClock } from '@plasmatrack/core';
+
+export class D1ManualDraftStore implements ManualDraftStore {
+  private readonly db: D1Database;
+  private readonly clock: Clock;
+
+  constructor(db: D1Database, clock: Clock = systemClock) {
+    this.db = db;
+    this.clock = clock;
+  }
+
+  async get(backend: string, userId: string): Promise<ManualDraft | null> {
+    const row = await this.db
+      .prepare('SELECT id, rev, job, created_at, expires_at FROM manual_drafts WHERE backend = ?1 AND user_id = ?2 AND expires_at > ?3')
+      .bind(backend, userId, this.clock.now())
+      .first<{ id: string; rev: number; job: string; created_at: number; expires_at: number }>();
+    if (!row) return null;
+    return {
+      id: row.id,
+      backend,
+      userId,
+      rev: row.rev,
+      job: JSON.parse(row.job) as ManualDraft['job'],
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+    };
+  }
+
+  async put(d: ManualDraft): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO manual_drafts (backend, user_id, id, rev, job, created_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT (backend, user_id) DO UPDATE SET id = excluded.id, rev = excluded.rev, job = excluded.job,
+           created_at = excluded.created_at, expires_at = excluded.expires_at`,
+      )
+      .bind(d.backend, d.userId, d.id, d.rev, JSON.stringify(d.job), d.createdAt, d.expiresAt)
+      .run();
+  }
+
+  async delete(backend: string, userId: string, id: string): Promise<boolean> {
+    const r = await this.db.prepare('DELETE FROM manual_drafts WHERE backend = ?1 AND user_id = ?2 AND id = ?3').bind(backend, userId, id).run();
+    return r.meta.changes > 0;
+  }
+
+  async purgeExpired(): Promise<number> {
+    const r = await this.db.prepare('DELETE FROM manual_drafts WHERE expires_at <= ?1').bind(this.clock.now()).run();
+    return r.meta.changes;
+  }
+}
+
+/**
+ * Fixed windows counted in D1: `limit` uses per key per `windowMs`.
+ * (Cloudflare's rate-limit binding only has 10 s and 60 s periods.)
+ */
+export class D1RateLimiter implements RateLimiter {
+  private readonly db: D1Database;
+  private readonly limit: number;
+  private readonly windowMs: number;
+  private readonly clock: Clock;
+
+  constructor(db: D1Database, limit: number, windowMs: number, clock: Clock = systemClock) {
+    this.db = db;
+    this.limit = limit;
+    this.windowMs = windowMs;
+    this.clock = clock;
+  }
+
+  async allow(key: string): Promise<boolean> {
+    const now = this.clock.now();
+    const windowStart = now - (now % this.windowMs);
+    const row = await this.db
+      .prepare(
+        `INSERT INTO rate_limits (key, window_start, count) VALUES (?1, ?2, 1)
+         ON CONFLICT (key, window_start) DO UPDATE SET count = count + 1
+         RETURNING count`,
+      )
+      .bind(key, windowStart)
+      .first<{ count: number }>();
+    return (row?.count ?? 1) <= this.limit;
+  }
+
+  /** Deletes windows that ended before `before` (ms). */
+  async purgeOlderThan(before: number): Promise<number> {
+    const result = await this.db.prepare('DELETE FROM rate_limits WHERE window_start <= ?1').bind(before - this.windowMs).run();
+    return result.meta.changes;
+  }
+}
 
 export class CloudflareWorkQueue<T> implements WorkQueue<T> {
   private readonly queue: Queue<T>;

@@ -5,9 +5,10 @@ American Truck Simulator. There is no website: this bot is the whole player-faci
 and the whole moderator interface. It consumes the PlasmaTrack server's JSON API and webhooks.
 ETS2 and ATS are never combined.
 
-**Status:** stages 1–5 of 6 are done (see below). The bot builds against the server's API
-contract v1, copied into [docs/contract/](docs/contract/). The server itself is not built
-yet, so everything that talks to it is tested against an in-memory mock of that contract.
+**Status:** all six stages are done (see below). The bot is
+connected to the production and test PlasmaTrack servers. It builds against the server's API
+contract v1, copied into [docs/contract/](docs/contract/), and its tests run against an
+in-memory mock of that contract and the server's own example responses.
 
 ## How it fits together
 
@@ -18,7 +19,8 @@ PlasmaTrack server ──webhooks──▶  │  answers within 3 s (Discord)   
                                   │  signature, then queues          │
                                   ▼                                 ▼
                               D1: notices, dedupe,         Renderer service (any host)
-                                  job versions             PMTiles basemaps + MapLibre Native → PNG
+                                  job versions, grants,    PMTiles basemaps + MapLibre Native → PNG
+                                  review posts, rate limits
                               R2: rendered PNG cache
 ```
 
@@ -40,6 +42,9 @@ Key behaviour:
 - **Moderator writes** need a reason: a required `reason` option on slash commands, or a reason form for buttons. Decisions send the job's version tag, so one made from an outdated view is refused instead of overwriting another moderator's.
 - **Moderator-issued tokens** are never shown to the moderator: the player gets a "Get your token" button (by DM, or in `/notices` if DMs are closed), and the token is created when they click.
 - **Server webhooks** are verified (HMAC-SHA256, 5-minute window, two secrets during a rotation), deduplicated on `event_id`, and handled from the queue. Player notifications and revocation notices are DMed immediately: the server has already applied its 5–30 s delay.
+- **Manual submissions:** `/submit` collects a job by hand with evidence screenshots. The renderer shrinks them to WebP and removes their metadata, the server stores them, and a moderator approves or declines with `/approve-manual` (which can correct stats and hide the custom map) or `/decline-manual`. Evidence is shown only to moderators and the submitter; the custom map is public unless hidden.
+- **Corrections:** `/edit-job` changes any field of any job; the server keeps edits through recalculations. `/post-approve` and `/post-decline` reverse earlier decisions.
+- **Limits and failures:** 5 slash commands per user per 20 seconds. Failed work is retried; if it still fails on the last try, or would outlive Discord's 15-minute window, the user is told instead of being left on "thinking…". Error replies carry a reference that matches the logs.
 - **Route images** colour each stretch by the server's `scale_class` and are always drawn over the vanilla map. A misaligned route is itself the sign of a 1:1 or modded map. Hidden and secret basemap features are removed before drawing. Every image carries the credits.
 
 ## Stages
@@ -51,10 +56,13 @@ Key behaviour:
 | 3 | Contract layer: vendored API contract, API client and schemas, mock API, webhook receiver, player and revocation DMs, renderer drawing for every route segment kind | ✅ |
 | 4 | Player features: `/token` (new, status, revoke), `/name`, `/profile`, `/job`, `/jobs`, `/leaderboard` | ✅ |
 | 5 | Moderator features: `/review` (queue, job view with route and speed/fuel charts, approve/reject/void/restore, trace), review-channel posts, `/recalc`, `/bonus`, `/player` (tokens collected by the player with a button, Singleplayer Division, blocking), `/config`, `/release`, `/revocation`, `/admins`, `/audit`, `/tmpflags` | ✅ |
-| 6 | Hardening and docs | |
+| 6 | Hardening and docs (retries that end in a reply, dead-letter queue, rate limit, error references, server-example contract tests, secret scan, CI, renderer Dockerfile, command/operations/data docs); manual submissions (`/submit`, `/approve-manual`, `/decline-manual`), `/post-approve`, `/post-decline`, `/edit-job`, `/stats`, `/history` | ✅ |
 
 ## Docs
 
+- [docs/COMMANDS.md](docs/COMMANDS.md): every command, for players and moderators
+- [docs/OPERATIONS.md](docs/OPERATIONS.md): runbook (errors and logs, connecting servers, adding a Discord server, rotating secrets, updating the contract)
+- [docs/DATA.md](docs/DATA.md): what the bot stores and for how long
 - [docs/BUILD.md](docs/BUILD.md): build, test, run locally
 - [docs/DEPLOY.md](docs/DEPLOY.md): Discord application, Cloudflare resources, renderer host
 - [docs/TILES.md](docs/TILES.md): generating basemaps with truckermudgeon/maps

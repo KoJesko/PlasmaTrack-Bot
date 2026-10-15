@@ -42,7 +42,29 @@ interface Job {
   world_km: number;
   game_km: number;
   delivered_at: string;
+  /** Manual jobs (PUBLIC_API §6): the submitted body, its images and moderator edits. */
+  origin?: 'tracked' | 'manual';
+  submission?: Json;
+  evidence?: { id: string; role: string }[];
+  hide_map?: boolean;
+  overrides?: Json;
 }
+
+interface Evidence {
+  owner: string;
+  bytes: Uint8Array;
+  content_type: string;
+  used: boolean;
+}
+
+const KM_PER_MI = 1.609344;
+const MAX_EVIDENCE_BYTES = 5 * 1024 * 1024;
+/** PATCH /admin/jobs fields (ADMIN_API §14). */
+const EDIT_FIELDS = new Set([
+  'unit', 'fuel_unit', 'start_city', 'start_company', 'end_city', 'end_company', 'cargo_name', 'distance', 'fuel_used', 'damage',
+  'profit', 'started_at', 'ended_at', 'truck', 'truck_model', 'mod_names', 'map_scale', 'uk', 'adjusted_scale', 'bonus_id',
+]);
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 interface Stored {
   bodyKey: string;
@@ -79,6 +101,8 @@ export class MockPlasmaTrackServer {
   readonly operations = new Map<string, Json>();
   /** TruckersMP account IDs the tracker reported, per Discord ID. */
   readonly truckersmpAccounts = new Map<string, number[]>();
+  /** Uploaded evidence images (PUBLIC_API §6). */
+  readonly evidence = new Map<string, Evidence>();
   private readonly idempotency = new Map<string, Stored>();
   private nextId = 1;
   private failures: { status: number; code: string; headers?: Record<string, string> }[] = [];
@@ -137,10 +161,18 @@ export class MockPlasmaTrackServer {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     const method = (init?.method ?? 'GET').toUpperCase();
     const headers = Object.fromEntries(new Headers(init?.headers).entries());
+    // Signed evidence links need no token (PUBLIC_API §6).
+    const dl = /^\/dl\/evidence\/(evd_\w+)$/.exec(url.pathname);
+    if (dl && method === 'GET') {
+      const e = this.evidence.get(dl[1]!);
+      return e ? new Response(e.bytes.slice(), { headers: { 'Content-Type': e.content_type } }) : error(404, 'not_found', 'no such image');
+    }
     const raw = typeof init?.body === 'string' ? init.body : undefined;
+    // Evidence uploads are raw bytes, not JSON.
+    const bytes: Uint8Array | undefined = init?.body instanceof Uint8Array ? init.body : init?.body instanceof ArrayBuffer ? new Uint8Array(init.body) : undefined;
     let body: unknown;
     try {
-      body = raw ? JSON.parse(raw) : undefined;
+      body = raw ? JSON.parse(raw) : bytes ? { raw_size: bytes.length, raw_sum: bytes.reduce((n: number, x: number) => (n + x) % 65521, 0) } : undefined;
     } catch {
       return error(400, 'bad_request', 'malformed JSON');
     }
@@ -156,10 +188,10 @@ export class MockPlasmaTrackServer {
     }
     const failure = this.failures.shift();
     if (failure) return error(failure.status, failure.code, 'injected failure', {}, failure.headers);
-    return this.handle(method, url, headers, body);
+    return this.handle(method, url, headers, body, bytes);
   };
 
-  private handle(method: string, url: URL, headers: Record<string, string>, body: unknown): Response {
+  private handle(method: string, url: URL, headers: Record<string, string>, body: unknown, bytes?: Uint8Array): Response {
     if (!url.pathname.startsWith('/api/v1/')) return error(404, 'not_found', 'no such route', { resource: 'route' });
     const path = url.pathname.slice('/api/v1'.length);
 
@@ -203,7 +235,7 @@ export class MockPlasmaTrackServer {
         if (stored.bodyKey !== bodyKey) return error(409, 'idempotency_mismatch', 'key reused with a different body');
         return replay(stored);
       }
-      const res = this.route(method, path, url.searchParams, b, actor);
+      const res = this.route(method, path, url.searchParams, b, actor, bytes ? { bytes, contentType: headers['content-type'] ?? '' } : undefined);
       if (res.status < 500) {
         this.idempotency.set(storeKey, { bodyKey, status: res.status, body: res.json });
       }
@@ -213,10 +245,36 @@ export class MockPlasmaTrackServer {
     return jsonResponse(res.status, res.json);
   }
 
-  private route(method: string, path: string, q: URLSearchParams, b: Json, actor?: Player): { status: number; json: Json } {
+  private route(
+    method: string,
+    path: string,
+    q: URLSearchParams,
+    b: Json,
+    actor?: Player,
+    raw?: { bytes: Uint8Array; contentType: string },
+  ): { status: number; json: Json } {
     let m: RegExpExecArray | null;
     const ok = (json: Json, status = 200) => ({ status, json });
     const err = (status: number, code: string, details: Json = {}) => ({ status, json: errorJson(code, code, details) });
+
+    // ---- manual submissions (PUBLIC_API §6)
+    if ((m = /^\/players\/(\d{17,20})\/evidence$/.exec(path)) && method === 'POST') {
+      if (!raw) return err(400, 'bad_request', { body: 'image bytes expected' });
+      if (raw.bytes.length > MAX_EVIDENCE_BYTES) return err(413, 'payload_too_large', { max_bytes: MAX_EVIDENCE_BYTES });
+      const p = this.players.get(m[1]!) ?? this.addPlayer(m[1]!, 'Player');
+      if (p.disabled) return err(403, 'forbidden', { reason: 'disabled' });
+      const id = `evd_${this.nextId++}`;
+      this.evidence.set(id, { owner: p.discord_user_id, bytes: raw.bytes, content_type: raw.contentType, used: false });
+      return ok({ evidence_id: id, content_type: raw.contentType, size_bytes: raw.bytes.length, sha256: '0'.repeat(64), expires_at: NOW }, 201);
+    }
+    if ((m = /^\/players\/(\d{17,20})\/manual-jobs$/.exec(path)) && method === 'POST') {
+      return this.submitManual(m[1]!, b);
+    }
+    if ((m = /^\/players\/(\d{17,20})\/jobs\/([0-9A-Z]{8})\/evidence$/.exec(path)) && method === 'GET') {
+      const j = this.jobs.get(m[2]!);
+      if (!j || j.owner !== m[1]) return err(404, 'not_found', { resource: 'job' });
+      return ok({ job_id: j.job_id, items: (j.evidence ?? []).map((e) => this.evidenceItem(e)) });
+    }
 
     // ---- player self-service (PUBLIC_API §1)
     if ((m = /^\/players\/(\d{17,20})\/token$/.exec(path))) {
@@ -254,13 +312,21 @@ export class MockPlasmaTrackServer {
         .map((j) => this.summary(j));
       return this.page(items, q, true);
     }
+    if ((m = /^\/public\/players\/(\d{17,20})\/jobs$/.exec(path))) {
+      const outcomes = q.get('outcome')?.split(',');
+      const items = [...this.jobs.values()]
+        .filter((j) => j.owner === m![1] && (!outcomes || outcomes.includes(j.outcome)))
+        .sort((a, b2) => b2.delivered_at.localeCompare(a.delivered_at))
+        .map((j) => this.summary(j));
+      return this.page(items, q, true);
+    }
     if ((m = /^\/public\/jobs\/([0-9A-Z]{8})$/.exec(path))) {
       const j = this.jobs.get(m[1]!);
       return j ? ok(this.detail(j)) : err(404, 'not_found', { resource: 'job' });
     }
     if ((m = /^\/public\/jobs\/([0-9A-Z]{8})\/route$/.exec(path))) {
       const j = this.jobs.get(m[1]!);
-      return j ? ok(this.route_(j, false)) : err(404, 'not_found', { resource: 'job' });
+      return j && j.origin !== 'manual' ? ok(this.route_(j, false)) : err(404, 'not_found', { resource: 'job' });
     }
     if ((m = /^\/public\/(ets2|ats)\/leaderboard$/.exec(path))) {
       const game = m[1] as Job['game'];
@@ -304,7 +370,7 @@ export class MockPlasmaTrackServer {
           ...this.summary(j),
           player: this.ref(j.owner),
           age_s: 43920,
-          reasons: j.outcome === 'invalid' ? [{ code: 'overspeed_invalid', details: {} }] : [{ code: 'late_start', text: 'Tracking started after the job was accepted.', details: {} }],
+          reasons: this.reasons(j),
         }));
       return this.page(items, q, true);
     }
@@ -320,11 +386,16 @@ export class MockPlasmaTrackServer {
     if ((m = /^\/admin\/jobs\/([0-9A-Z]{8})$/.exec(path))) {
       const j = this.jobs.get(m[1]!);
       if (!j) return err(404, 'not_found', { resource: 'job' });
-      return ok({ ...this.detail(j), reasons: [], etag: etag(j), state: 'delivered', start_kind: 'tracked', timeline: [] });
+      if (method === 'PATCH') {
+        const problem = this.applyEdit(j, b, actor!.discord_user_id, String(b['reason']));
+        if (problem) return err(422, 'validation_failed', { fields: problem });
+        return ok({ job_id: j.job_id, outcome: j.outcome, points: j.points, held_points: j.held_points, overrides: j.overrides ?? {}, etag: etag(j) });
+      }
+      return ok(this.adminDetail(j));
     }
     if ((m = /^\/admin\/jobs\/([0-9A-Z]{8})\/series$/.exec(path))) {
       const j = this.jobs.get(m[1]!);
-      if (!j) return err(404, 'not_found', { resource: 'job' });
+      if (!j || j.origin === 'manual') return err(404, 'not_found', { resource: 'job' });
       const max = Math.min(4000, Number(q.get('max_points') ?? 1000));
       if (!Number.isInteger(max) || max < 1) return err(400, 'bad_request', { max_points: 'invalid' });
       return ok({
@@ -340,7 +411,7 @@ export class MockPlasmaTrackServer {
     }
     if ((m = /^\/admin\/jobs\/([0-9A-Z]{8})\/route$/.exec(path))) {
       const j = this.jobs.get(m[1]!);
-      return j ? ok(this.route_(j, true)) : err(404, 'not_found', { resource: 'job' });
+      return j && j.origin !== 'manual' ? ok(this.route_(j, true)) : err(404, 'not_found', { resource: 'job' });
     }
     if ((m = /^\/admin\/jobs\/([0-9A-Z]{8})\/trace$/.exec(path))) {
       const j = this.jobs.get(m[1]!);
@@ -356,6 +427,14 @@ export class MockPlasmaTrackServer {
         return err(409, 'conflict', { current_etag: etag(j) });
       }
       if (!TRANSITIONS[action].includes(j.outcome)) return err(409, 'invalid_transition', { from: j.outcome, action });
+      if (action !== 'approve' && (b['hide_map'] !== undefined || b['corrections'] !== undefined)) {
+        return err(422, 'validation_failed', { fields: { [b['hide_map'] !== undefined ? 'hide_map' : 'corrections']: 'only on approve' } });
+      }
+      if (b['corrections'] !== undefined) {
+        const problem = this.applyEdit(j, b['corrections'] as Json, actor!.discord_user_id, String(b['reason']));
+        if (problem) return err(422, 'validation_failed', { fields: Object.fromEntries(Object.entries(problem).map(([k, v]) => [`corrections.${k}`, v])) });
+      }
+      if (typeof b['hide_map'] === 'boolean') j.hide_map = b['hide_map'];
       const before = j.outcome;
       if (action === 'approve') this.setOutcome(j, 'approved');
       else if (action === 'reject') this.setOutcome(j, 'rejected');
@@ -532,6 +611,178 @@ export class MockPlasmaTrackServer {
     };
   }
 
+  private submitManual(discordId: string, b: Json): { status: number; json: Json } {
+    const p = this.players.get(discordId) ?? this.addPlayer(discordId, 'Player');
+    if (p.disabled) return { status: 403, json: errorJson('forbidden', 'player disabled', { reason: 'disabled' }) };
+    const fields: Record<string, string> = {};
+    const str = (k: string) => typeof b[k] === 'string' && (b[k] as string).trim() !== '';
+    const num = (k: string) => typeof b[k] === 'number' && Number.isFinite(b[k]);
+    if (b['game'] !== 'ets2' && b['game'] !== 'ats') fields['game'] = 'ets2 or ats';
+    if (b['unit'] !== 'mi' && b['unit'] !== 'km') fields['unit'] = 'mi or km';
+    if (!['l', 'us_gal', 'uk_gal'].includes(String(b['fuel_unit']))) fields['fuel_unit'] = 'l, us_gal or uk_gal';
+    for (const k of ['start_city', 'start_company', 'end_city', 'end_company', 'cargo_name', 'truck', 'started_at', 'ended_at']) if (!str(k)) fields[k] = 'required';
+    for (const k of ['distance', 'fuel_used', 'damage', 'profit']) if (!num(k)) fields[k] = 'a number';
+    if (num('damage') && ((b['damage'] as number) < 0 || (b['damage'] as number) > 100)) fields['damage'] = 'a number from 0 to 100';
+    if ('bonus_id' in b) fields['bonus_id'] = 'a player never picks a bonus';
+    const uk = b['uk'] as Json | undefined;
+    if (uk && b['game'] !== 'ets2') fields['uk'] = 'ETS2 only';
+    const images: { id: string; role: string; field: string }[] = [];
+    const evidence = Array.isArray(b['evidence']) ? (b['evidence'] as unknown[]) : [];
+    if (evidence.length < 1 || evidence.length > 5) fields['evidence'] = '1 to 5 images';
+    evidence.forEach((id, i) => images.push({ id: String(id), role: 'main', field: `evidence[${i}]` }));
+    if (b['custom_map'] !== undefined) images.push({ id: String(b['custom_map']), role: 'custom_map', field: 'custom_map' });
+    if (uk?.['route_evidence'] !== undefined) images.push({ id: String(uk['route_evidence']), role: 'uk_route', field: 'uk.route_evidence' });
+    const adj = b['adjusted_scale'] as Json | undefined;
+    if (adj?.['evidence'] !== undefined) images.push({ id: String(adj['evidence']), role: 'adjusted_scale', field: 'adjusted_scale.evidence' });
+    for (const img of images) {
+      const e = this.evidence.get(img.id);
+      if (!e || e.owner !== discordId || e.used) fields[img.field] = 'not an unused image of this player';
+    }
+    if (Object.keys(fields).length > 0) return { status: 422, json: errorJson('validation_failed', 'Some fields are invalid.', { fields }) };
+
+    for (const img of images) this.evidence.get(img.id)!.used = true;
+    const jobId = `MAN${String(this.nextId++).padStart(5, '0')}`;
+    const job = this.addJob({
+      job_id: jobId,
+      game: b['game'] as Job['game'],
+      owner: discordId,
+      outcome: 'pending_review',
+      delivered_at: NOW,
+      origin: 'manual',
+      submission: structuredClone(b),
+      evidence: images.map((i) => ({ id: i.id, role: i.role })),
+      hide_map: false,
+      overrides: {},
+    });
+    this.rescoreManual(job);
+    job.held_points = job.scored_points;
+    this.log('self', 'job.submit', { kind: 'job', id: jobId }, null, {}, { game: job.game, evidence: images.length });
+    return { status: 201, json: this.detail(job) };
+  }
+
+  /** World distance the manual way (PUBLIC_API §6): (D − UK − adj) ÷ scale + UK ÷ 15 + adj ÷ its scale. */
+  private rescoreManual(j: Job) {
+    const s = this.sheetInput(j);
+    const k = s['unit'] === 'mi' ? KM_PER_MI : 1;
+    const d = Number(s['distance']) * k;
+    const uk = s['uk'] ? Number((s['uk'] as Json)['distance'] ?? 0) * k : 0;
+    const adj = s['adjusted_scale'] as Json | undefined;
+    const adjKm = adj ? Number(adj['distance'] ?? 0) * k : 0;
+    const scale = typeof s['map_scale'] === 'number' ? (s['map_scale'] as number) : j.game === 'ets2' ? 19 : 20;
+    const world = (d - uk - adjKm) / scale + uk / 15 + (adj ? adjKm / Number(adj['scale'] ?? 1) : 0);
+    j.game_km = round2(d);
+    j.world_km = round2(world);
+    j.scored_points = Math.floor(world / KM_PER_MI);
+  }
+
+  /** The submission (or nothing, for tracked jobs) with moderator edits laid over it. */
+  private sheetInput(j: Job): Json {
+    const base: Json = structuredClone(j.submission ?? {});
+    for (const [k, v] of Object.entries(j.overrides ?? {})) {
+      if ((k === 'uk' || k === 'adjusted_scale') && v && typeof v === 'object' && base[k]) base[k] = { ...(base[k] as Json), ...(v as Json) };
+      else base[k] = v;
+    }
+    return base;
+  }
+
+  /** ADMIN_API §14. Returns the bad fields, or null when applied. */
+  private applyEdit(j: Job, b: Json, actor: string, reason: string): Record<string, string> | null {
+    const changes = Object.fromEntries(Object.entries(b).filter(([k]) => k !== 'reason' && k !== 'expected_etag'));
+    const fields: Record<string, string> = {};
+    for (const k of Object.keys(changes)) if (!EDIT_FIELDS.has(k)) fields[k] = 'unknown field';
+    const distances = ['distance', 'uk', 'adjusted_scale'].some((k) => changes[k] !== undefined && changes[k] !== null);
+    if (distances && changes['unit'] !== 'mi' && changes['unit'] !== 'km') fields['unit'] = 'needed with a distance';
+    if (typeof changes['fuel_used'] === 'number' && !changes['fuel_unit']) fields['fuel_unit'] = 'needed with fuel_used';
+    const real = Object.keys(changes).filter((k) => k !== 'unit' && k !== 'fuel_unit');
+    if (real.length === 0 && Object.keys(fields).length === 0) fields['(body)'] = 'nothing to change';
+    if (Object.keys(fields).length > 0) return fields;
+
+    const before = { points: j.points, held_points: j.held_points, overrides: structuredClone(j.overrides ?? {}) };
+    j.overrides = { ...(j.overrides ?? {}), ...changes };
+    if (j.origin === 'manual') {
+      this.rescoreManual(j);
+    } else if (typeof changes['distance'] === 'number') {
+      const km = (changes['distance'] as number) * (changes['unit'] === 'mi' ? KM_PER_MI : 1);
+      const ratio = j.game_km > 0 ? km / j.game_km : 1;
+      j.game_km = round2(km);
+      j.world_km = round2(j.world_km * ratio);
+      j.scored_points = round2(j.scored_points * ratio);
+    }
+    if (j.outcome === 'valid' || j.outcome === 'approved') j.points = j.scored_points;
+    if (j.outcome === 'pending_review') j.held_points = j.scored_points;
+    j.version++;
+    this.log(actor, 'job.edit', { kind: 'job', id: j.job_id }, reason, before, { points: j.points, held_points: j.held_points, overrides: j.overrides });
+    return null;
+  }
+
+  private evidenceItem(e: { id: string; role: string }): Json {
+    const ev = this.evidence.get(e.id);
+    return {
+      evidence_id: e.id,
+      role: e.role,
+      content_type: ev?.content_type ?? 'image/webp',
+      size_bytes: ev?.bytes.length ?? 0,
+      url: `${BASE_URL}/dl/evidence/${e.id}?exp=1792000000&sig=x`,
+      expires_at: NOW,
+    };
+  }
+
+  private customMap(j: Job, admin: boolean): Json | null {
+    const e = j.evidence?.find((x) => x.role === 'custom_map');
+    if (!e || (j.hide_map && !admin)) return null;
+    const item = this.evidenceItem(e);
+    return { url: item['url'], expires_at: item['expires_at'] };
+  }
+
+  private reasons(j: Job): Json[] {
+    if (j.origin === 'manual') return [{ code: 'manual_submission', text: 'Submitted by hand: a moderator checks the evidence.', details: {} }];
+    return j.outcome === 'invalid' ? [{ code: 'overspeed_invalid', details: {} }] : [{ code: 'late_start', text: 'Tracking started after the job was accepted.', details: {} }];
+  }
+
+  private adminDetail(j: Job): Json {
+    const s = this.sheetInput(j);
+    const manual = j.origin === 'manual';
+    const k = s['unit'] === 'mi' ? KM_PER_MI : 1;
+    const sheet: Json = manual
+      ? {
+          distance_km: round2(Number(s['distance']) * k),
+          distance_mi: round2((Number(s['distance']) * k) / KM_PER_MI),
+          map_scale: s['map_scale'] ?? (j.game === 'ets2' ? 19 : 20),
+          fuel_used_l: s['fuel_used'] ?? null,
+          damage_pct: s['damage'] ?? null,
+          profit: s['profit'] ?? null,
+          started_at: s['started_at'],
+          ended_at: s['ended_at'],
+          truck: s['truck'],
+          truck_model: s['truck_model'] ?? null,
+          mods: s['mod_names'] ?? [],
+          cargo_name: s['cargo_name'],
+          source_city: s['start_city'],
+          source_company: s['start_company'],
+          destination_city: s['end_city'],
+          destination_company: s['end_company'],
+          uk: s['uk'] ? { ...(s['uk'] as Json), distance_km: round2(Number((s['uk'] as Json)['distance']) * k) } : null,
+          adjusted_scale: s['adjusted_scale'] ? { ...(s['adjusted_scale'] as Json), distance_km: round2(Number((s['adjusted_scale'] as Json)['distance']) * k) } : null,
+        }
+      : { distance_km: j.game_km, distance_mi: round2(j.game_km / KM_PER_MI), cargo_name: 'Vaccines', damage_pct: null, profit: null, truck: null, map_scale: null, uk: null, adjusted_scale: null };
+    return {
+      ...this.detail(j),
+      reasons: this.reasons(j),
+      etag: etag(j),
+      state: 'delivered',
+      start_kind: manual ? 'manual' : 'tracked',
+      timeline: [],
+      speed: manual ? null : { peak_mph: 61 },
+      integrity: manual ? null : {},
+      sheet,
+      overrides: j.overrides ?? {},
+      submission: manual ? { unit: j.submission!['unit'], fuel_unit: j.submission!['fuel_unit'], map_scale_defaulted: j.submission!['map_scale'] === undefined, sheet } : null,
+      evidence: (j.evidence ?? []).map((e) => this.evidenceItem(e)),
+      hide_map: j.hide_map ?? false,
+      custom_map: this.customMap(j, true),
+    };
+  }
+
   private setOutcome(j: Job, outcome: Outcome) {
     j.outcome = outcome;
     const counts = outcome === 'valid' || outcome === 'approved';
@@ -589,11 +840,44 @@ export class MockPlasmaTrackServer {
       game_km: sum((j) => j.game_km),
       game_mi: sum((j) => j.game_km * 0.621371),
       pending_review_count: jobs.filter((j) => j.outcome === 'pending_review').length,
+      outcomes: Object.fromEntries(
+        (['valid', 'approved', 'pending_review', 'invalid', 'rejected', 'discarded', 'voided'] as const).map((o) => [o, jobs.filter((j) => j.outcome === o).length]),
+      ),
+      distance_by_scale_class: {
+        city: { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 },
+        road: { world_km: sum((j) => j.world_km), world_mi: sum((j) => j.world_km * 0.621371), game_km: sum((j) => j.game_km), game_mi: sum((j) => j.game_km * 0.621371) },
+        one_to_one: { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 },
+        nonstandard: { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 },
+        unknown: { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 },
+      },
     };
   }
 
   private summary(j: Job): Json {
+    if (j.origin === 'manual') {
+      const s = this.sheetInput(j);
+      return {
+        job_id: j.job_id,
+        game: j.game,
+        outcome: j.outcome,
+        points: j.points,
+        held_points: j.held_points,
+        world_km: j.world_km,
+        world_mi: round2(j.world_km / KM_PER_MI),
+        game_km: j.game_km,
+        game_mi: round2(j.game_km / KM_PER_MI),
+        cargo: { id: null, name: s['cargo_name'] },
+        source: { city_id: null, city_name: s['start_city'], company_id: null, company_name: s['start_company'] },
+        destination: { city_id: null, city_name: s['end_city'], company_id: null, company_name: s['end_company'] },
+        market: null,
+        delivered_at: j.delivered_at,
+        reported_delivered_at: s['ended_at'],
+        multiplayer: { kind: 'unknown', truckersmp: null },
+        origin: 'manual',
+      };
+    }
     return {
+      origin: 'tracked',
       job_id: j.job_id,
       game: j.game,
       outcome: j.outcome,
@@ -624,6 +908,8 @@ export class MockPlasmaTrackServer {
       bonus: null,
       distance_by_scale_class: { city: { world_km: 2.81, world_mi: 1.75, game_km: 8.43, game_mi: 5.24 }, road: { world_km: 8.57, world_mi: 5.33, game_km: 117.27, game_mi: 72.87 }, one_to_one: zero, nonstandard: zero, unknown: zero },
       public_notes: j.outcome === 'pending_review' ? [{ code: 'under_review', text: 'A moderator will check this job.' }] : [],
+      custom_map: this.customMap(j, false),
+      ...(j.origin === 'manual' ? { planned_distance_km: null } : {}),
     };
   }
 

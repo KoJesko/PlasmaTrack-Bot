@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Secret scan, licenses, typecheck, core and Worker tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run secret-scan
+      - run: npm run license-audit
+      - run: npm run typecheck
+      - run: npm test -w @plasmatrack/core
+      - run: npm test -w @plasmatrack/worker
+      - run: npm run build -w @plasmatrack/worker
+
+  renderer:
+    name: Renderer tests (headless Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Headless MapLibre Native on Linux hasn't been verified yet (docs/BUILD.md).
+    # Remove this line once a run has passed.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: System libraries for MapLibre Native, and a virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libcurl4 libuv1 libjpeg-turbo8 libpng16-16t64 libwebp7 libicu74 libopengl0 libgl1 libegl1
+      - run: npm ci
+      - run: xvfb-run -a npm test -w @plasmatrack/renderer

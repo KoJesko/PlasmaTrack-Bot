@@ -3,11 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { tasks } from '../src/commands/index.ts';
 import { DiscordApiError } from '../src/discord/rest.ts';
 import {
+  describeQueueMessage,
+  GAVE_UP,
   GENERIC_FAILURE,
   INTERACTION_TOKEN_TTL_MS,
   NOTICES_TASK,
   processQueueMessage,
 } from '../src/interactions/tasks.ts';
+import { withReference } from '../src/interactions/router.ts';
 import { RetryableError, UserFacingError, type QueueMessage, type TaskDefinition } from '../src/interactions/types.ts';
 import type { Notice } from '../src/ports.ts';
 import { APP_ID, BACKEND, GUILD_ID, INTERACTION_TOKEN, taskDeps, USER_A, USER_B } from './helpers.ts';
@@ -114,9 +117,49 @@ describe('processQueueMessage', () => {
     expect((discord.calls[0]!.message as { content: string }).content).toBe('Job not found.');
 
     await processQueueMessage(message('bug', clock.t), all, deps);
-    expect((discord.calls[1]!.message as { content: string }).content).toBe(GENERIC_FAILURE);
+    expect((discord.calls[1]!.message as { content: string }).content).toBe(withReference(GENERIC_FAILURE, '1'));
+    expect(lines.some((l) => l.level === 'error' && l.line.includes('"interactionId":"1"'))).toBe(true);
     expect(JSON.stringify(discord.calls)).not.toContain('internal detail');
     expect(lines.some((l) => l.level === 'error')).toBe(true);
+  });
+
+  it('tells the user on the last try instead of retrying into silence', async () => {
+    const { deps, discord, clock } = taskDeps();
+    const early = await processQueueMessage(message('flaky', clock.t), all, deps, { attempt: 5, maxAttempts: 6 });
+    expect(early).toEqual({ status: 'retry', delaySeconds: 7 });
+    const last = await processQueueMessage(message('flaky', clock.t), all, deps, { attempt: 6, maxAttempts: 6 });
+    expect(last).toEqual({ status: 'done' });
+    expect((discord.calls[0]!.message as { content: string }).content).toBe(withReference(GAVE_UP, '1'));
+  });
+
+  it('gives up when a retry would run after the interaction token expires', async () => {
+    const { deps, discord, clock } = taskDeps();
+    // 14 minutes old, retry in 7 s: still inside the window.
+    const fresh = await processQueueMessage(message('flaky', clock.t - 14 * 60_000), all, deps);
+    expect(fresh).toEqual({ status: 'retry', delaySeconds: 7 });
+    // 14 min 25 s old: a 7 s delay would cross the 30 s safety margin.
+    const stale = await processQueueMessage(message('flaky', clock.t - 14 * 60_000 - 25_000), all, deps);
+    expect(stale).toEqual({ status: 'done' });
+    expect((discord.calls[0]!.message as { content: string }).content).toContain('busy right now');
+  });
+
+  it('describes messages for logs without tokens or bodies', () => {
+    const { clock } = taskDeps();
+    const described = JSON.stringify([
+      describeQueueMessage(message('ok', clock.t)),
+      describeQueueMessage({ type: 'notice-hint', interaction: { id: '9', applicationId: APP_ID, token: INTERACTION_TOKEN, userId: USER_A, receivedAt: clock.t } }),
+      describeQueueMessage({
+        type: 'player-dm',
+        backend: BACKEND,
+        key: 'evt_1:' + USER_A,
+        userId: USER_A,
+        message: { content: 'PRIVATE-DM-TEXT' },
+        notice: { kind: 'other', text: 'PRIVATE-DM-TEXT' },
+      }),
+    ]);
+    expect(described).not.toContain(INTERACTION_TOKEN);
+    expect(described).not.toContain('PRIVATE-DM-TEXT');
+    expect(described).toContain('"task":"ok"');
   });
 
   it('drops work whose interaction token has (nearly) expired', async () => {

@@ -5,8 +5,11 @@ import {
   type APIInteraction,
 } from 'discord-api-types/v10';
 import { createLogger, type LogLevel } from '../src/log.ts';
+import { MediaError, type FetchedMedia, type MediaFetcher } from '../src/media.ts';
+import type { ImageCompressor } from '../src/render/client.ts';
 import {
   MemoryDedupeStore,
+  MemoryManualDraftStore,
   MemoryJobVersionStore,
   MemoryNoticeStore,
   MemoryReviewPostStore,
@@ -60,7 +63,7 @@ type Base = {
   /** Picked values, for select menus. */
   values?: string[];
   /** resolved.attachments, for commands with file options. */
-  attachments?: Record<string, { url: string; size: number; filename: string }>;
+  attachments?: Record<string, { url: string; size: number; filename: string; content_type?: string }>;
 };
 
 function base(opts: Base) {
@@ -193,6 +196,39 @@ export class FakeDiscord implements DiscordSender {
   }
 }
 
+/** A tiny but valid-looking WebP (RIFF…WEBP) of `size` bytes. */
+export function fakeWebp(size = 64): Uint8Array<ArrayBuffer> {
+  const b = new Uint8Array(Math.max(size, 16));
+  b.set([0x52, 0x49, 0x46, 0x46], 0);
+  b.set([0x57, 0x45, 0x42, 0x50], 8);
+  return b;
+}
+
+/** A structurally valid PNG (signature, IHDR, filler, IEND) of about `size` bytes; CRCs are not real. */
+export function fakePng(size = 64, extraChunks: { type: string; data: Uint8Array }[] = []): Uint8Array<ArrayBuffer> {
+  const chunk = (type: string, data: Uint8Array) => {
+    const c = new Uint8Array(12 + data.length);
+    new DataView(c.buffer).setUint32(0, data.length);
+    c.set([...type].map((ch) => ch.charCodeAt(0)), 4);
+    c.set(data, 8);
+    return c;
+  };
+  const parts = [
+    new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', new Uint8Array(13)),
+    ...extraChunks.map((x) => chunk(x.type, x.data)),
+    chunk('IDAT', new Uint8Array(Math.max(0, size - 57))),
+    chunk('IEND', new Uint8Array(0)),
+  ];
+  const out = new Uint8Array(parts.reduce((n, x) => n + x.length, 0));
+  let o = 0;
+  for (const x of parts) {
+    out.set(x, o);
+    o += x.length;
+  }
+  return out;
+}
+
 export function taskDeps(clock = new FakeClock()) {
   const discord = new FakeDiscord();
   const notices = new MemoryNoticeStore(clock);
@@ -201,6 +237,27 @@ export function taskDeps(clock = new FakeClock()) {
     renderRoute: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
     renderChart: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
   };
+  /** Images "compressed" by the fake: a WebP header plus the input's length. */
+  const images: ImageCompressor & { calls: number; fail: Error | null } = {
+    calls: 0,
+    fail: null,
+    async compressImage(bytes) {
+      this.calls++;
+      if (this.fail) throw this.fail;
+      return { bytes: fakeWebp(bytes.length), contentType: 'image/webp' as const };
+    },
+  };
+  /** URL → file. Discord attachments and evidence links in tests come from here. */
+  const files = new Map<string, FetchedMedia>();
+  const media: MediaFetcher = {
+    async get(url, maxBytes) {
+      const f = files.get(url);
+      if (!f) throw new MediaError(`no such file: ${url}`);
+      if (f.bytes.length > maxBytes) throw new MediaError('file too large');
+      return f;
+    },
+  };
+  const drafts = new MemoryManualDraftStore(clock);
   const queue = new MemoryWorkQueue<QueueMessage>();
   const dedupe = new MemoryDedupeStore(clock);
   const jobVersions = new MemoryJobVersionStore(clock);
@@ -216,6 +273,9 @@ export function taskDeps(clock = new FakeClock()) {
     clock,
     logger,
     renderer,
+    images,
+    media,
+    drafts,
     backends: {
       forGuild: (guildId) => (guildId && GUILDS[guildId] ? backend : null),
       byName: (name) => (name === backend.name ? backend.api : null),
@@ -229,5 +289,5 @@ export function taskDeps(clock = new FakeClock()) {
     queue,
     noticeTtlDays: 30,
   };
-  return { deps, backend, discord, notices, clock, lines, queue, dedupe, jobVersions, grants, reviewPosts, reviewChannels };
+  return { deps, backend, discord, notices, clock, lines, queue, dedupe, jobVersions, grants, reviewPosts, reviewChannels, images, files, drafts };
 }

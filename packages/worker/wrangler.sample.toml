@@ -34,8 +34,21 @@ queue = "plasmatrack-work"
 queue = "plasmatrack-work"
 max_batch_size = 10
 max_batch_timeout = 1   # seconds; keep low, users are waiting on "thinking…"
-max_retries = 5
-# dead_letter_queue = "plasmatrack-work-dlq"
+max_retries = 5        # keep in sync with MAX_RETRIES in src/index.ts
+dead_letter_queue = "plasmatrack-work-dlq"
+
+# Messages out of retries: the same Worker logs what was lost and drops them.
+[[queues.consumers]]
+queue = "plasmatrack-work-dlq"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 0
+
+# Workers Logs: keeps the bot's JSON log lines (secrets are masked before logging),
+# searchable in the Cloudflare dashboard for a few days.
+[observability]
+enabled = true
+head_sampling_rate = 1
 
 # Daily cleanup of expired dedupe rows and notices.
 [triggers]

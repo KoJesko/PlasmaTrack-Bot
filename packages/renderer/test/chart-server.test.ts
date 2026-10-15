@@ -2,11 +2,14 @@ import type { AddressInfo } from 'node:net';
 import {
   chartRenderRequestSchema,
   createLogger,
+  ImageRejectedError,
+  stripImageMetadata,
   MemoryBlobCache,
   RendererClient,
   ROUTE_PATH,
   signRendererRequest,
 } from '@plasmatrack/core';
+import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chartSvg, downsample, formatDuration, niceTicks, renderChart, timeTicks } from '../src/chart.ts';
 import { Limiter, QueueFullError } from '../src/limiter.ts';
@@ -105,6 +108,43 @@ describe('renderer HTTP service', () => {
     expect((await decodePng(map.bytes)).width).toBe(400);
     const chart = await client.renderChart({ title: 'Fuel', unit: 'L', points: [[0, 400], [60, 380]] });
     expect((await decodePng(chart.bytes)).height).toBe(500);
+  });
+
+  it('compresses evidence images to WebP: at most 1920 px, metadata (GPS) removed', async () => {
+    const client = new RendererClient({ baseUrl: base, key: KEY, cache: new MemoryBlobCache() });
+    const jpeg = new Uint8Array(
+      await sharp({ create: { width: 3840, height: 2160, channels: 3, background: '#4a7' } })
+        .jpeg()
+        .withExif({ IFD0: { Make: 'TestCam' }, IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '51/1 7/1 0/1' } })
+        .toBuffer(),
+    );
+    expect((await sharp(jpeg).metadata()).exif).toBeDefined();
+    const out = await client.compressImage(jpeg, 'image/jpeg');
+    const meta = await sharp(out.bytes).metadata();
+    expect(meta.format).toBe('webp');
+    expect([meta.width, meta.height]).toEqual([1920, 1080]);
+    expect(meta.exif).toBeUndefined();
+    // Small images are not enlarged.
+    const small = new Uint8Array(await sharp({ create: { width: 200, height: 100, channels: 3, background: '#000' } }).png().toBuffer());
+    expect((await sharp((await client.compressImage(small, 'image/png')).bytes).metadata()).width).toBe(200);
+  });
+
+  it('the bot’s fallback strips EXIF/GPS from real JPEG and WebP files, which still decode', async () => {
+    const exif = { IFD0: { Make: 'TestCam' }, IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '51/1 7/1 0/1' } };
+    const img = sharp({ create: { width: 64, height: 32, channels: 3, background: '#4a7' } });
+    for (const input of [await img.clone().jpeg().withExif(exif).toBuffer(), await img.clone().webp().withExif(exif).toBuffer()]) {
+      expect((await sharp(input).metadata()).exif).toBeDefined();
+      const out = stripImageMetadata(new Uint8Array(input))!;
+      const meta = await sharp(out).metadata();
+      expect(meta.exif).toBeUndefined();
+      expect([meta.width, meta.height]).toEqual([64, 32]);
+      await sharp(out).raw().toBuffer(); // the pixels are intact
+    }
+  });
+
+  it('refuses something that is not an image, so the bot can tell the player', async () => {
+    const client = new RendererClient({ baseUrl: base, key: KEY, cache: new MemoryBlobCache() });
+    await expect(client.compressImage(new TextEncoder().encode('not an image at all'), 'image/png')).rejects.toBeInstanceOf(ImageRejectedError);
   });
 
   it('rejects unsigned, wrongly signed and stale requests with 401', async () => {

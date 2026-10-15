@@ -1,10 +1,12 @@
 import { canonicalJson, sha256Hex, utf8 } from '../bytes.ts';
 import { RetryableError } from '../interactions/types.ts';
+import { sniffImageType } from '../media.ts';
 import type { BlobCache, CachedBlob, Clock } from '../ports.ts';
 import { systemClock } from '../ports.ts';
 import {
   CHART_PATH,
   chartRenderRequestSchema,
+  COMPRESS_PATH,
   RENDER_PROTOCOL_VERSION,
   ROUTE_PATH,
   routeRenderRequestSchema,
@@ -23,6 +25,17 @@ export interface ImageRenderer {
   renderChart(request: ChartRenderRequest): Promise<RenderedImage>;
 }
 
+/** Shrinks evidence images before they are uploaded (the renderer does it with sharp). */
+export interface ImageCompressor {
+  /** WebP, at most 1920 px on the long side, metadata (e.g. GPS) removed. */
+  compressImage(bytes: Uint8Array<ArrayBuffer>, contentType: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: 'image/webp' }>;
+}
+
+/** The renderer could read the request but not the image: retrying won't help. */
+export class ImageRejectedError extends Error {
+  override name = 'ImageRejectedError';
+}
+
 export interface RendererClientOptions {
   baseUrl: string;
   key: string;
@@ -39,7 +52,7 @@ const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
  * Fetches PNGs from the external renderer service, signed with the shared key,
  * and caches them by a hash of the request. Nothing is rendered in the Worker.
  */
-export class RendererClient implements ImageRenderer {
+export class RendererClient implements ImageRenderer, ImageCompressor {
   private readonly options: RendererClientOptions;
   private readonly fetchFn: typeof fetch;
   private readonly clock: Clock;
@@ -56,6 +69,30 @@ export class RendererClient implements ImageRenderer {
 
   renderChart(request: ChartRenderRequest): Promise<RenderedImage> {
     return this.render(CHART_PATH, 'chart', chartRenderRequestSchema.parse(request));
+  }
+
+  async compressImage(bytes: Uint8Array<ArrayBuffer>, contentType: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: 'image/webp' }> {
+    const headers = {
+      'Content-Type': contentType,
+      ...(await signRendererRequest(this.options.key, 'POST', COMPRESS_PATH, bytes, this.clock.now() / 1000)),
+    };
+    let res: Response;
+    try {
+      res = await this.fetchFn(new URL(COMPRESS_PATH, this.options.baseUrl).toString(), {
+        method: 'POST',
+        headers,
+        body: bytes,
+        signal: AbortSignal.timeout(this.options.timeoutMs ?? 25_000),
+      });
+    } catch (err) {
+      throw new RetryableError(`renderer unreachable: ${String(err)}`, 10);
+    }
+    if (res.status === 429 || res.status >= 500) throw new RetryableError(`renderer answered ${res.status}`, 10);
+    if (res.status === 400 || res.status === 413 || res.status === 415) throw new ImageRejectedError(`renderer rejected the image (${res.status})`);
+    if (!res.ok) throw new Error(`renderer rejected the compress request (${res.status})`);
+    const out = new Uint8Array(await res.arrayBuffer());
+    if (sniffImageType(out) !== 'image/webp') throw new Error('renderer returned something that is not WebP');
+    return { bytes: out, contentType: 'image/webp' };
   }
 
   private async render(path: string, kind: string, request: unknown): Promise<RenderedImage> {
