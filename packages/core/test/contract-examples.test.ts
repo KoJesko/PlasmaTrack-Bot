@@ -67,6 +67,9 @@ const RESPONSES: Record<string, z.ZodType> = {
   public_leaderboard_by_fuel: S.leaderboardSchema,
   public_player_history: S.playerHistorySchema,
   public_job_series: S.seriesSchema,
+  public_client: S.publicClientSchema,
+  player_client_download: S.clientDownloadSchema,
+  admin_release_offer: S.releaseSchema,
   public_player: S.playerProfileSchema,
   public_player_jobs: page(S.jobSummarySchema),
   public_player_stats: S.gameStatsResponseSchema,
@@ -76,7 +79,7 @@ const RESPONSES: Record<string, z.ZodType> = {
 const ROUTES = ['admin_job_route', 'public_job_route'];
 
 /** Endpoints the bot doesn't call (yet), so it has no schema for them. */
-const NOT_CALLED = ['admin_backup_create'];
+const NOT_CALLED = ['admin_backup_create', 'admin_release_create_update'];
 
 const WEBHOOKS: Record<string, z.ZodType> = {
   'job.scored': E.jobScoredSchema,

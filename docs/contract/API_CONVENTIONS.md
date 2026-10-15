@@ -230,3 +230,19 @@ These answer the bot's open questions "(Q)". **The project owner confirmed all o
   - **Leaderboards** take `sort` and `order`.
   - **Series points** gain cargo damage and distance from the start (PUBLIC_API §3, §5;
     ADMIN_API §5).
+- 2026-10-15 (owner): automatic client updates (docs/UPDATES.md), from client 0.2.0. Migration 0004.
+  - **New:** `GET /api/v1/public/client`, the newest release with a setup link that stays the same
+    across releases (`/dl/setup`, PUBLIC_API §7).
+  - **New:** `POST /admin/releases/{id}/offer`.
+  - **Releases** take and return `update`, `installer`, `notes` and `offered`
+    (ADMIN_API §11).
+- 2026-10-15 (owner): only some Discord roles may download the tracker, and anyone may download
+  an uninstaller (PUBLIC_API §7).
+  - **Removed:** the public `/dl/setup` link.
+  - **New:** `GET /players/{id}/client-download`, a personal one-hour setup link; the bot checks
+    roles first.
+  - **New:** `/dl/uninstall`, public.
+  - **`GET /public/client`:** `installer` no longer has a `url`; there is a new
+    `uninstaller` block.
+  - **Clients** send their player token for updates (client 0.2.1).
+  - **The revocation message** now points to `/download` in Discord.

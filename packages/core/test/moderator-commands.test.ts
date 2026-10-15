@@ -304,6 +304,31 @@ describe('/config, /admins, /audit', () => {
     expect(server.configVersions).toHaveLength(1);
   });
 
+  it('/release list shows which updates are offered; /release offer pulls one and puts it back', async () => {
+    const { run, server } = setup();
+    server.releases.push(
+      { release_id: 'rel_0_2_0', release_version: '0.2.0', platform: 'windows', files: [], update: { files: 10, bytes: 8_536_073 }, installer: 'PlasmaTrack-Setup-0.2.0.exe', notes: null, offered: true },
+      { release_id: 'rel_0_1_1', release_version: '0.1.1', platform: 'windows', files: [], update: null, installer: null, notes: null, offered: false },
+    );
+    const list = await run(commandInteraction('release', mod({ options: [sub('list')] })));
+    const text = list.sent!.embeds![0]!.description!;
+    expect(text).toContain('`rel_0_2_0` **0.2.0** · windows · 0 files · update 8.1 MB, **offered**');
+    expect(text).toContain('`rel_0_1_1` **0.1.1** · windows · 0 files · no update');
+
+    const pulled = await run(commandInteraction('release', mod({ options: [sub('offer', [opt('release', 'rel_0_2_0'), opt('offered', false, 5), opt('reason', 'Crashes on start')])] })));
+    expect(pulled.sent!.content).toContain('Stopped offering **0.2.0**');
+    expect(server.releases[0]!['offered']).toBe(false);
+    expect(server.audit.at(-1)).toMatchObject({ action: 'release.offer', reason: 'Crashes on start' });
+
+    const back = await run(commandInteraction('release', mod({ options: [sub('offer', [opt('release', 'rel_0_2_0'), opt('offered', true, 5), opt('reason', 'Fixed build')])] })));
+    expect(back.sent!.content).toContain('Installed clients now get **0.2.0**');
+
+    const noUpdate = await run(commandInteraction('release', mod({ options: [sub('offer', [opt('release', 'rel_0_1_1'), opt('offered', true, 5), opt('reason', 'Try it')])] })));
+    expect(noUpdate.sent!.content).toContain('has no update');
+    const bad = await run(commandInteraction('release', mod({ options: [sub('offer', [opt('release', '0.2.0'), opt('offered', true, 5), opt('reason', 'Try it')])] })));
+    expect(bad.response.data!.content).toContain('Release IDs look like');
+  });
+
   it('adds an admin and shows the audit log', async () => {
     const { run } = setup();
     const add = await run(commandInteraction('admins', mod({ options: [sub('add', [opt('user', OTHER_ID, 6), opt('reason', 'New moderator')])] })));

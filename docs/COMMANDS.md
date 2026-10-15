@@ -18,6 +18,8 @@ don't count. Past the limit, the bot asks you to wait a few seconds.
 |---|---|---|
 | `/about` | private | What PlasmaTrack is, its license and the map credits. Works for everyone. |
 | `/token new` | private | Links your Discord account and gives you a token for the desktop tracker. If you already have one, it asks before replacing it, since the old one stops working. |
+| `/download` | private | A personal link to PlasmaTrack Setup for Windows, valid for an hour, with install steps. Only for the roles that may use the bot; the server has no public setup link. After installing, PlasmaTrack updates itself. |
+| `/uninstall [private]` | public | How to remove PlasmaTrack: Windows Installed apps (0.2.1 and newer), or the uninstaller, which anyone can download. Works for everyone in the server, without a role. |
 | `/token status` | private | When your token was made and last used. Never the token itself. |
 | `/token revoke` | private | Stops your token from working (asks first). |
 | `/name name:` | private | The name shown for you on leaderboards (2–32 characters). |
@@ -148,7 +150,8 @@ Edits are kept by the server as overrides. They survive every recalculation, and
 | `/config list` | Published `plasmatrack.toml` versions, newest first. |
 | `/config publish file: current: reason:` | Publishes a `plasmatrack.toml` (max 256 KiB). |
 | `/config make-current version: reason:` | Makes an older version current again. |
-| `/release list` | Published tracker releases. |
+| `/release list` | Published tracker releases, with each one's update size and whether installed clients are offered it. |
+| `/release offer release: offered: reason:` | Starts or stops offering a release's update to installed clients (they update themselves every 6 hours, once the games are closed). Use `offered: False` to pull a bad build. Publishing an update stays with the server's `publish-release` script, because updates are signed with an offline key. |
 | `/release publish version: platform: file: reason:` | Publishes a release manifest (JSON, max 1 MiB). |
 | `/revocation list [status]` | Revocations of releases or config versions. |
 | `/revocation schedule kind: id: reason:` | Stops accepting a release or config version after 21 days. Players using it are DMed. |

@@ -17,9 +17,9 @@ describe('buildCommandRegistration', () => {
   it('registers every command per server; moderator commands hidden by default', () => {
     expect(reg.guild.map((c) => c.name).sort()).toEqual(
       [
-        'about', 'admins', 'approve-manual', 'audit', 'bonus', 'config', 'decline-manual', 'edit-job', 'graph', 'history', 'job', 'jobs',
+        'about', 'admins', 'approve-manual', 'audit', 'bonus', 'config', 'decline-manual', 'download', 'edit-job', 'graph', 'history', 'job', 'jobs',
         'leaderboard', 'name', 'notices', 'player', 'post-approve', 'post-decline', 'profile', 'recalc', 'release', 'review',
-        'revocation', 'stats', 'submit', 'tmpflags', 'token',
+        'revocation', 'stats', 'submit', 'tmpflags', 'token', 'uninstall',
       ],
     );
     expect([...moderator].sort()).toEqual([

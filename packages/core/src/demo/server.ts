@@ -114,6 +114,8 @@ export class MockPlasmaTrackServer {
   readonly bonuses = new Map<string, Json>();
   readonly configVersions: Json[] = [];
   readonly releases: Json[] = [];
+  /** The newest offered client release (PUBLIC_API §7); null before any is published. */
+  client: { version: string; setupBytes: number } | null = { version: '0.2.1', setupBytes: 103_203_097 };
   readonly revocations = new Map<string, Json>();
   readonly operations = new Map<string, Json>();
   /** TruckersMP account IDs the tracker reported, per Discord ID. */
@@ -314,6 +316,37 @@ export class MockPlasmaTrackServer {
       if (!p) return err(404, 'not_found', { resource: 'user' });
       if (typeof b['display_name'] === 'string') p.display_name = b['display_name'];
       return ok(this.profile(p.discord_user_id));
+    }
+
+    // ---- downloading PlasmaTrack (PUBLIC_API §7)
+    if ((m = /^\/players\/(\d{17,20})\/client-download$/.exec(path)) && method === 'GET') {
+      if (this.players.get(m[1]!)?.disabled) return err(403, 'forbidden', { reason: 'disabled' });
+      if (!this.client) return err(404, 'not_found', { resource: 'release' });
+      const { version, setupBytes } = this.client;
+      const file = `PlasmaTrack-Setup-${version}.exe`;
+      return ok({
+        platform: 'windows',
+        release_id: `rel_${version.replace(/\./g, '_')}_windows`,
+        version,
+        notes: 'Uploads resume faster after a network outage.',
+        file_name: file,
+        bytes: setupBytes,
+        url: `${BASE_URL}/dl/releases/windows/${version}/${file}?exp=1792000000&sig=${m[1]}`,
+        expires_at: '2026-10-14T10:20:11.000Z',
+      });
+    }
+    if (path === '/public/client') {
+      if (!this.client) return err(404, 'not_found', { resource: 'release' });
+      const { version, setupBytes } = this.client;
+      return ok({
+        platform: 'windows',
+        release_id: `rel_${version.replace(/\./g, '_')}_windows`,
+        version,
+        published_at: NOW,
+        notes: null,
+        installer: { file_name: `PlasmaTrack-Setup-${version}.exe`, bytes: setupBytes },
+        uninstaller: { file_name: 'PlasmaTrack-Uninstall.exe', bytes: 1_689_088, url: `${BASE_URL.replace(/\/api\/v1$/, '')}/dl/uninstall/windows` },
+      });
     }
 
     // ---- public reads (PUBLIC_API §2–5)
@@ -572,6 +605,14 @@ export class MockPlasmaTrackServer {
       const r = { release_id: `rel_${String(b['release_version']).replace(/\./g, '_')}`, ...fields, created_at: NOW };
       this.releases.push(r);
       return ok(r, 201);
+    }
+    if ((m = /^\/admin\/releases\/([A-Za-z0-9_]+)\/offer$/.exec(path)) && method === 'POST') {
+      const r = this.releases.find((x) => x['release_id'] === m![1]);
+      if (!r) return err(404, 'not_found', { resource: 'release' });
+      if (!r['update']) return err(422, 'validation_failed', { fields: { offered: 'this release has no update' } });
+      r['offered'] = b['offered'] === true;
+      this.log(actor!.discord_user_id, 'release.offer', { kind: 'release', id: m[1]! }, String(b['reason']), {}, { offered: r['offered'] });
+      return ok(r);
     }
     if (path === '/admin/revocations') {
       if (method === 'GET') {

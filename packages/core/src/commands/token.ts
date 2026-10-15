@@ -167,7 +167,7 @@ export function tokenMessage(issued: TokenIssue): OutgoingMessage {
       '```',
       issued.token.token,
       '```',
-      'Paste it into **PlasmaTrack Setup**. Keep it secret: anyone with it can upload jobs as you.',
+      'Paste it into **PlasmaTrack Setup** (get it with `/download`). Keep it secret: anyone with it can upload jobs as you.',
       'Lost it? Run `/token new` for a new one (the old one then stops working).',
     ].join('\n'),
     components: [],

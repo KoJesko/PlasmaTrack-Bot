@@ -1,5 +1,6 @@
 import type { InteractionHandlers, TaskDefinition } from '../interactions/types.ts';
 import { aboutCommand } from './about.ts';
+import { downloadCommand, downloadTask, uninstallCommand, uninstallTask } from './download.ts';
 import { graphCommand, graphJobTask, graphLeaderboardTask, graphPlayerTask } from './graph.ts';
 import { historyCommand, historyComponent, historyTask, statsCommand, statsTask } from './history.ts';
 import { jobCommand, jobTask } from './job.ts';
@@ -61,6 +62,8 @@ export const handlers: InteractionHandlers = {
     aboutCommand,
     noticesCommand,
     tokenCommand,
+    downloadCommand,
+    uninstallCommand,
     nameCommand,
     profileCommand,
     jobCommand,
@@ -107,6 +110,8 @@ export const tasks: TaskDefinition[] = [
   tokenNewTask,
   tokenStatusTask,
   tokenRevokeTask,
+  downloadTask,
+  uninstallTask,
   nameTask,
   profileTask,
   jobTask,

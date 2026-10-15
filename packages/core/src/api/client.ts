@@ -16,6 +16,8 @@ import {
   jobSummarySchema,
   leaderboardSchema,
   playerHistorySchema,
+  clientDownloadSchema,
+  publicClientSchema,
   operationSchema,
   pageSchema,
   playerProfileSchema,
@@ -223,6 +225,16 @@ export class PlasmaTrackApi {
   }
 
   /** A valid or approved tracked job's series, without reverted parts (404 for any other job). */
+  /** A personal, hour-long setup link for a player (404 before any setup is published). */
+  getClientDownload(discordId: string, platform: 'windows' = 'windows') {
+    return this.request('GET', `/players/${discordId}/client-download`, clientDownloadSchema, { query: { platform } });
+  }
+
+  /** The newest release, with the public uninstaller link (404 before any release is offered). */
+  getClient(platform: 'windows' = 'windows') {
+    return this.request('GET', '/public/client', publicClientSchema, { query: { platform } });
+  }
+
   getJobSeries(jobId: string, maxPoints = 1000) {
     return this.request('GET', `/public/jobs/${jobId}/series`, seriesSchema, { query: { max_points: maxPoints } });
   }
@@ -485,6 +497,11 @@ export class AdminApi {
 
   publishRelease(release: ReleaseInput, meta: WriteMeta) {
     return this.write('POST', '/releases', releaseSchema, meta, release);
+  }
+
+  /** Starts or stops offering a release's update to installed clients (422 without an update). */
+  offerRelease(releaseId: string, offered: boolean, meta: WriteMeta) {
+    return this.write('POST', `/releases/${releaseId}/offer`, releaseSchema, meta, { offered });
   }
 
   listRevocations(options: ListOptions & { status?: string } = {}) {

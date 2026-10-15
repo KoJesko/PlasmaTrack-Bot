@@ -2,7 +2,7 @@ import type { APIApplicationCommandBasicOption, APIApplicationCommandSubcommandO
 import { z } from 'zod';
 import { idempotencyKey, type ReleaseInput } from '../../api/client.ts';
 import { formatJobId, parseJobId } from '../../api/ids.ts';
-import type { AuditEntry } from '../../api/schemas.ts';
+import type { AuditEntry, Release } from '../../api/schemas.ts';
 import { ApplicationCommandOptionType, ButtonStyle, ComponentType } from '../../discord/constants.ts';
 import { UserFacingError, type CommandDefinition, type ComponentDefinition, type TaskDefinition } from '../../interactions/types.ts';
 import { checkTruckersMpAccounts, TRUCKERSMP_PROFILE } from '../../truckersmp/client.ts';
@@ -24,6 +24,7 @@ type Op =
   | { op: 'config.current'; version: string; reason: string }
   | { op: 'release.list' }
   | { op: 'release.publish'; version: string; platform: 'windows' | 'linux'; file: Upload; reason: string }
+  | { op: 'release.offer'; release: string; offered: boolean; reason: string }
   | { op: 'revocation.list'; status: string | null }
   | { op: 'revocation.schedule'; kind: 'release' | 'config_version'; id: string; reason: string }
   | { op: 'revocation.cancel'; id: string; reason: string }
@@ -87,13 +88,25 @@ export const configCommand: CommandDefinition = {
   },
 };
 
+/** One line of /release list: its files, and the update installed clients may get. */
+function releaseLine(r: Release): string {
+  const update = r.update ? ` · update ${(r.update.bytes / 1_048_576).toFixed(1)} MB, ${r.offered ? '**offered**' : 'not offered'}` : ' · no update';
+  const when = r.created_at ? ` · ${discordTime(r.created_at, 'D')}` : '';
+  return `\`${r.release_id ?? '?'}\` **${r.release_version}** · ${r.platform} · ${r.files?.length ?? '?'} files${update}${when}`;
+}
+
 export const releaseCommand: CommandDefinition = {
   access: 'moderator',
   json: {
     name: 'release',
-    description: 'Release manifests: the files of each tracker release (moderators)',
+    description: 'Tracker releases: manifests and which update clients get (moderators)',
     options: [
-      sub('list', 'Published releases'),
+      sub('list', 'Published releases, and which ones installed clients are offered'),
+      sub('offer', 'Start or stop offering a release’s update to installed clients, e.g. to pull a bad build', [
+        { type: S.String, name: 'release', description: 'Release ID from /release list, like rel_0_2_0', required: true, max_length: 64 },
+        { type: S.Boolean, name: 'offered', description: 'True: clients install it; False: stop offering it', required: true },
+        REASON_OPTION,
+      ]),
       sub('publish', 'Publish a release manifest (JSON, max 1 MiB)', [
         { type: S.String, name: 'version', description: 'Release version, like 0.1.0', required: true, max_length: 32 },
         {
@@ -113,6 +126,11 @@ export const releaseCommand: CommandDefinition = {
   },
   handle: ({ interaction }) => {
     if (subcommand(interaction) === 'list') return defer({ op: 'release.list' });
+    if (subcommand(interaction) === 'offer') {
+      const release = stringOption(interaction, 'release')?.trim() ?? '';
+      if (!/^rel_[A-Za-z0-9_]{1,60}$/.test(release)) return reply('Release IDs look like `rel_0_2_0` (see `/release list`).');
+      return defer({ op: 'release.offer', release, offered: booleanOption(interaction, 'offered') ?? false, reason: stringOption(interaction, 'reason') ?? '' });
+    }
     const file = attachmentOption(interaction, 'file');
     const version = stringOption(interaction, 'version')?.trim() ?? '';
     const platform = stringOption(interaction, 'platform');
@@ -305,7 +323,15 @@ export const manageTask: TaskDefinition = {
         }
         case 'release.list': {
           const page = await admin.listReleases({ limit: 25 });
-          return list('Releases', page.items.map((r) => `\`${r.release_id ?? '?'}\` **${r.release_version}** · ${r.platform} · ${r.files?.length ?? '?'} files${r.created_at ? ` · ${discordTime(r.created_at, 'D')}` : ''}`));
+          return list('Releases', page.items.map(releaseLine));
+        }
+        case 'release.offer': {
+          const r = await admin.offerRelease(op.release, op.offered, meta(op.reason));
+          return say(
+            r.offered
+              ? `Installed clients now get **${r.release_version}** (${r.platform}) as an update, once no revocation targets it.`
+              : `Stopped offering **${r.release_version}** (${r.platform}). Clients that already installed it keep it.`,
+          );
         }
         case 'release.publish': {
           const text = await download(op.file, RELEASE_MAX);

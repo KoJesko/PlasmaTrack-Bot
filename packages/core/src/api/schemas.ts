@@ -582,8 +582,41 @@ export const releaseSchema = obj({
   platform: z.string(),
   files: z.array(obj({ role: z.string(), path_pattern: z.string(), sha256: z.string() })).optional(),
   created_at: timestamp.optional(),
+  /** Self-updating clients (server 68abaf0): the signed update, if any, and whether it's offered. */
+  update: obj({ files: z.number().int(), bytes: z.number().int() }).nullable().optional(),
+  installer: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  offered: z.boolean().optional(),
 });
 export type Release = z.infer<typeof releaseSchema>;
+
+// ---------------------------------------------------------------------------
+// Downloading PlasmaTrack (PUBLIC_API §7, owner 2026-10-15)
+
+/** A personal setup link: signed, works for an hour without a token. Show it privately. */
+export const clientDownloadSchema = obj({
+  platform: z.string(),
+  release_id: z.string(),
+  version: z.string(),
+  notes: z.string().nullable().optional(),
+  file_name: z.string(),
+  bytes: z.number().int(),
+  url: z.string(),
+  expires_at: timestamp,
+});
+export type ClientDownload = z.infer<typeof clientDownloadSchema>;
+
+/** The newest offered release; the uninstaller link is public and never changes. */
+export const publicClientSchema = obj({
+  platform: z.string(),
+  release_id: z.string(),
+  version: z.string(),
+  published_at: timestamp.optional(),
+  notes: z.string().nullable().optional(),
+  installer: obj({ file_name: z.string(), bytes: z.number().int() }).nullable().optional(),
+  uninstaller: obj({ file_name: z.string(), bytes: z.number().int(), url: z.string() }).nullable().optional(),
+});
+export type PublicClient = z.infer<typeof publicClientSchema>;
 
 export const revocationSchema = obj({
   revocation_id: z.string(),
