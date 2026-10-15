@@ -84,7 +84,7 @@ head_sampling_rate = 1
 # Daily cleanup of expired dedupe rows and notices.
 [triggers]
 # Daily clean-up, and the weekly backup (BACKUP_CRON in src/index.ts).
-crons = ["17 3 * * *", "47 3 * * 0"]
+crons = ["17 3 * * *", "47 3 * * SUN"]
 
 [vars]
 DISCORD_APPLICATION_ID = "<application id>"
