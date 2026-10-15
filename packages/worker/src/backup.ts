@@ -30,8 +30,12 @@ export function backupKey(now: number): string {
 }
 
 /**
- * One SQL literal. Text is quoted, numbers written as is, blobs as X'..'. Line breaks
- * in text become char(10)/char(13), so every statement stays on one line.
+ * One SQL literal. Text is quoted, numbers written as is, blobs as X'..'.
+ *
+ * Every statement must stay on one line, so line breaks in text are written as markers
+ * and turned back by at most two replace() calls. Not `' || char(10) || '` per break: D1
+ * limits expression depth to 100, so a text with ~100 line breaks wouldn't restore (found
+ * by the server's backup; local SQLite allows 1000, so tests alone don't catch it).
  */
 export function sqlLiteral(value: Value): string {
   if (value === null) return 'NULL';
@@ -42,10 +46,29 @@ export function sqlLiteral(value: Value): string {
   if (value instanceof ArrayBuffer) {
     return `X'${[...new Uint8Array(value)].map((b) => b.toString(16).padStart(2, '0')).join('')}'`;
   }
-  return `'${value
-    .replace(/'/g, "''")
-    .replace(/\n/g, "' || char(10) || '")
-    .replace(/\r/g, "' || char(13) || '")}'`;
+  const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  const hasLf = value.includes('\n');
+  const hasCr = value.includes('\r');
+  if (!hasLf && !hasCr) return quote(value);
+
+  // The first markers (~n0~/~r0~, ~n1~/~r1~, …) whose decoding, done exactly like SQL's
+  // replace(), gives back the original text.
+  for (let k = 0; ; k++) {
+    const lf = `~n${k}~`;
+    const cr = `~r${k}~`;
+    let encoded: string = value;
+    if (hasLf) encoded = encoded.replaceAll('\n', lf);
+    if (hasCr) encoded = encoded.replaceAll('\r', cr);
+    let decoded: string = encoded;
+    if (hasCr) decoded = decoded.replaceAll(cr, '\r');
+    if (hasLf) decoded = decoded.replaceAll(lf, '\n');
+    if (decoded !== value) continue;
+
+    let sql = quote(encoded);
+    if (hasCr) sql = `replace(${sql}, '${cr}', char(13))`;
+    if (hasLf) sql = `replace(${sql}, '${lf}', char(10))`;
+    return sql;
+  }
 }
 
 /** The whole backup as SQL: per table, empty it, then insert every row. */

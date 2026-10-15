@@ -29,7 +29,11 @@ beforeEach(async () => {
 describe('sqlLiteral', () => {
   it('quotes text, writes numbers and NULL, and hex-encodes blobs', () => {
     expect(sqlLiteral("it's")).toBe("'it''s'");
-    expect(sqlLiteral('a\nb')).toBe("'a' || char(10) || 'b'");
+    expect(sqlLiteral('a\nb')).toBe("replace('a~n0~b', '~n0~', char(10))");
+    expect(sqlLiteral('a\r\nb')).toBe("replace(replace('a~r0~~n0~b', '~r0~', char(13)), '~n0~', char(10))");
+    // A marker already in the text, or one a line break would complete, is skipped.
+    expect(sqlLiteral('~n0~\n')).toBe("replace('~n0~~n1~', '~n1~', char(10))");
+    expect(sqlLiteral('~n0\n')).toBe("replace('~n0~n1~', '~n1~', char(10))");
     expect(sqlLiteral(42)).toBe('42');
     expect(sqlLiteral(null)).toBe('NULL');
     expect(sqlLiteral(new Uint8Array([0, 255]).buffer)).toBe("X'00ff'");
@@ -50,6 +54,13 @@ describe('dumpTables', () => {
     )
       .bind('111', 'n1', 'invalid', "Job 7K2M-9QXA: it's \"invalid\"\nsecond line", 1, 2, null, 'test')
       .run();
+    // Far more line breaks than D1's expression depth limit (100), plus tricky markers.
+    const long = Array.from({ length: 1500 }, (_, i) => `line ${i} ~n0~ ~r0`).join('\r\n');
+    await env.DB.prepare(
+      'INSERT INTO notices (discord_user_id, id, kind, text, created_at, expires_at, read_at, backend) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    )
+      .bind('111', 'n2', 'info', long, 1, 2, null, 'test')
+      .run();
     await env.DB.prepare('INSERT INTO review_posts (backend, job_id, channel_id, message_id) VALUES (?, ?, ?, ?)')
       .bind('test', '7K2M9QXA', '222', '333')
       .run();
@@ -60,7 +71,7 @@ describe('dumpTables', () => {
 
     const before = await snapshot();
     const { sql, rows } = await dumpTables(env.DB);
-    expect(rows).toEqual({ notices: 1, token_grants: 0, review_posts: 1, job_versions: 0, dedupe: 1201 });
+    expect(rows).toEqual({ notices: 2, token_grants: 0, review_posts: 1, job_versions: 0, dedupe: 1201 });
     // One statement per line, so a newline inside text must not break a line.
     expect(sql.split('\n').filter((l) => l.startsWith('INSERT INTO dedupe'))).toHaveLength(1201);
 
