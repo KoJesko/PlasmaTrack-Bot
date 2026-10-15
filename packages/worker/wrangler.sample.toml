@@ -9,6 +9,9 @@
 name = "plasmatrack-bot"
 main = "src/index.ts"
 compatibility_date = "2026-08-15"
+# Lets the bot fetch a PlasmaTrack server on this account's workers.dev. Without it Cloudflare
+# blocks Worker-to-Worker fetches there (error 1042, seen as a 404).
+compatibility_flags = ["global_fetch_strictly_public"]
 
 # Serves POST /interactions (Discord) and GET /healthz.
 # Point the Discord application's "Interactions Endpoint URL" at
