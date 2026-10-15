@@ -16,14 +16,16 @@ FROM ubuntu:24.04
 
 ARG NODE_VERSION=24.21.0
 
-# xvfb gives MapLibre Native a display; Mesa's llvmpipe draws on the CPU (no GPU).
+# Xvfb gives MapLibre Native a display; Mesa's llvmpipe draws on the CPU (no GPU).
+# tini runs as PID 1: it passes SIGTERM on to the renderer and reaps Xvfb.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates curl xz-utils \
-      xvfb xauth \
+      ca-certificates curl xz-utils tini \
+      xvfb \
       libgl1 libegl1 libopengl0 libgl1-mesa-dri libegl-mesa0 libglx-mesa0 \
       libcurl4 libuv1 libjpeg-turbo8 libpng16-16t64 libwebp7 libicu74 \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 # Node.js from nodejs.org, checked against its published SHA-256.
 RUN set -eu; \
@@ -50,6 +52,7 @@ COPY LICENSE.md NOTICE THIRD_PARTY_NOTICES.md ./
 COPY packages/core/src packages/core/src
 COPY packages/renderer/src packages/renderer/src
 COPY packages/renderer/assets packages/renderer/assets
+COPY --chmod=0755 packages/renderer/docker-entrypoint.sh packages/renderer/
 
 ENV NODE_ENV=production \
     RENDERER_HOST=0.0.0.0 \
@@ -60,5 +63,6 @@ ENV NODE_ENV=production \
 USER ubuntu
 EXPOSE 8788
 
-# MapLibre Native needs a GL context; xvfb-run gives it a virtual display.
-CMD ["xvfb-run", "-a", "node", "packages/renderer/src/main.ts"]
+# The entrypoint starts Xvfb (MapLibre Native needs a display), then the renderer.
+# /tmp/.X11-unix is made above because Xvfb, running as a normal user, won't create it.
+ENTRYPOINT ["/usr/bin/tini", "--", "packages/renderer/docker-entrypoint.sh"]

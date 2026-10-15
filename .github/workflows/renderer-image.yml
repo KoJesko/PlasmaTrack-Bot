@@ -42,11 +42,20 @@ jobs:
 
       - name: Smoke test (starts, draws a map and an AVIF)
         run: |
+          # The container's log is printed however this step ends.
+          trap 'echo "--- container log"; docker logs smoke 2>&1 || true; docker rm -f smoke >/dev/null 2>&1 || true' EXIT
           docker run -d --name smoke -e RENDERER_KEY=smoke-test-key-0123456789abcdef0123 -p 127.0.0.1:8788:8788 "plasmatrack-renderer:${GITHUB_SHA::12}"
-          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8788/healthz && break; sleep 1; done
+          ready=
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8788/healthz 2>/dev/null; then ready=1; break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' smoke)" != true ]; then
+              echo "::error::the container exited (code $(docker inspect -f '{{.State.ExitCode}}' smoke))"
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ -z "$ready" ]; then echo "::error::the renderer did not answer /healthz within 60 s"; exit 1; fi
           RENDERER_URL=http://127.0.0.1:8788 RENDERER_KEY=smoke-test-key-0123456789abcdef0123 node packages/renderer/scripts/smoke.ts
-          docker logs smoke
-          docker rm -f smoke
 
       - name: Push to Cloudflare's registry
         env:
