@@ -25,6 +25,8 @@ export function apiFailure(err: unknown, texts: ErrorTexts = {}): Error {
   if (err instanceof ReasonError) return new UserFacingError(err.message);
   if (!(err instanceof ApiError)) return err instanceof Error ? err : new Error(String(err));
   if (err.retryable) return new RetryableError(err.message, Math.max(2, Math.ceil(err.retryAfterSeconds ?? 5)));
+  // A 404 means not found even without the server's error body (seen live: an empty body).
+  if (err.status === 404) return new UserFacingError(texts.notFound ?? 'Not found.');
   switch (err.code) {
     case 'not_found':
       return new UserFacingError(texts.notFound ?? 'Not found.');

@@ -255,6 +255,9 @@ describe('task error mapping', () => {
     expect(apiFailure(new ApiError(503, 'unavailable', 'x', {}, 9))).toBeInstanceOf(RetryableError);
     expect((apiFailure(new ApiError(503, 'unavailable', 'x', {}, 9)) as RetryableError).delaySeconds).toBe(9);
     expect(apiFailure(new ApiError(404, 'not_found', 'x'), { notFound: 'No job with that ID.' }).message).toBe('No job with that ID.');
+    // A 404 without the error body (e.g. an empty one) is still "not found", not a bug.
+    expect(apiFailure(new ApiError(404, 'http_404', 'x'), { notFound: 'No job with that ID.' })).toBeInstanceOf(UserFacingError);
+    expect(apiFailure(new ApiError(404, 'http_404', 'x'), { notFound: 'No job with that ID.' }).message).toBe('No job with that ID.');
     expect(apiFailure(new ApiError(409, 'invalid_transition', 'x', { from: 'discarded', action: 'approve' })).message).toBe(
       'A job that is discarded can’t be given “approve”.',
     );
