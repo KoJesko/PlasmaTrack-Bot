@@ -1,4 +1,5 @@
 import type { QueueMessage } from '@plasmatrack/core';
+import type { RendererContainer } from './renderer-container.ts';
 
 /**
  * Worker bindings. Plain strings come from `[vars]` in wrangler.toml; secrets
@@ -11,6 +12,10 @@ export interface Env {
   DB: D1Database;
   WORK_QUEUE: Queue<QueueMessage>;
   RENDER_CACHE: R2Bucket;
+  /** The renderer as a Cloudflare Container (src/renderer-container.ts). Without it, RENDERER_URL is used. */
+  RENDERER?: DurableObjectNamespace<RendererContainer>;
+  /** Private basemaps ({game}.pmtiles) the container loads when it starts. */
+  TILES?: R2Bucket;
 
   DISCORD_APPLICATION_ID: string;
   DISCORD_PUBLIC_KEY: string;

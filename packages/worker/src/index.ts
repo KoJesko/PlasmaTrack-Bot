@@ -38,6 +38,8 @@ import {
   R2BlobCache,
 } from './adapters.ts';
 
+export { RendererContainer } from './renderer-container.ts';
+
 export const WEBHOOK_PATH = '/webhooks/plasmatrack';
 /** Must match `max_retries` of the work queue's consumer in wrangler.toml. */
 const MAX_RETRIES = 5;
@@ -83,11 +85,24 @@ function runtime(env: Env): Runtime {
   return cached.runtime;
 }
 
+/** One renderer container for the whole bot; it queues work itself. */
+const RENDERER_INSTANCE = 'renderer';
+/** A cold container start (boot + basemaps) comes before the first render. */
+const CONTAINER_RENDER_TIMEOUT_MS = 60_000;
+
 function consumerDeps(env: Env, rt: Runtime): ConsumerDeps {
+  const container = env.RENDERER;
   const renderer = new RendererClient({
-    baseUrl: rt.config.RENDERER_URL,
     key: rt.config.RENDERER_KEY,
     cache: new R2BlobCache(env.RENDER_CACHE),
+    ...(container
+      ? {
+          // Reached through the binding only; the host name is never resolved.
+          baseUrl: 'http://renderer.internal',
+          fetch: (input, init) => container.get(container.idFromName(RENDERER_INSTANCE)).fetch(new Request(input, init)),
+          timeoutMs: CONTAINER_RENDER_TIMEOUT_MS,
+        }
+      : { baseUrl: rt.config.RENDERER_URL }),
   });
   return {
     discord: new DiscordRest({ applicationId: rt.config.DISCORD_APPLICATION_ID, botToken: rt.config.DISCORD_BOT_TOKEN }),

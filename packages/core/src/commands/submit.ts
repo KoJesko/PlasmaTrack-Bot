@@ -34,7 +34,7 @@ import { attachmentOption, GAME_OPTION, numberOption, stringOption, subcommand }
 // /submit: a job submitted by hand (PUBLIC_API §6, owner's design 2026-10-15).
 //
 // `/submit job` checks the typed values, then (from the queue) downloads the
-// attached images, has the renderer shrink them to WebP, uploads them to the
+// attached images, has the renderer shrink them to AVIF, uploads them to the
 // server and keeps a draft. The player sees a private preview with Send and
 // Cancel. `/submit adjusted-scale` adds that section to the draft (Discord
 // allows 25 options per command, and the whole form needs 29). Nothing reaches
@@ -104,7 +104,7 @@ const JOB_OPTIONS = [
   textOption('date_ended', `When you delivered, UTC, like 2026-10-14T08:20:00Z`, true, 40),
   textOption('truck', 'Truck brand, e.g. Scania', true),
   textOption('truck_model', 'Truck model, e.g. S 730', true),
-  imageOption('evidence', 'Screenshot proving the delivery (PNG, JPEG or WebP)', true),
+  imageOption('evidence', 'Screenshot proving the delivery (PNG, JPEG, WebP or AVIF)', true),
   numOption('map_scale', 'Map scale (default: ETS2 19, ATS 20)', false, 0.01, 1000),
   textOption('mod_names', 'Mods you used, separated by commas', false, 1000),
   imageOption('custom_map', 'Your route on a custom map (public unless a moderator hides it)', false),
@@ -119,7 +119,7 @@ const ADJUSTED_OPTIONS = [
   textOption('exit_city', 'City where it ends', true),
   numOption('distance', 'Its distance, in the unit of your submission', true, 0.01, 100_000),
   numOption('scale', 'Its map scale, e.g. 1 for a 1:1 map', true, 0.01, 1000),
-  imageOption('evidence', 'Screenshot proving that section (PNG, JPEG or WebP)', true),
+  imageOption('evidence', 'Screenshot proving that section (PNG, JPEG, WebP or AVIF)', true),
 ];
 
 export const submitCommand: CommandDefinition = {
@@ -176,7 +176,7 @@ function image(i: APIChatInputApplicationCommandInteraction, option: string, rol
   const a = attachmentOption(i, option);
   if (!a) return undefined;
   if (!a.contentType || !(IMAGE_TYPES as readonly string[]).includes(a.contentType)) {
-    problems.push(`\`${option}\` must be a PNG, JPEG or WebP image.`);
+    problems.push(`\`${option}\` must be a PNG, JPEG, WebP or AVIF image.`);
     return undefined;
   }
   if (a.size > MAX_ATTACHMENT_BYTES) {
@@ -455,7 +455,7 @@ interface Uploaded {
 }
 
 /**
- * Downloads one attachment, shrinks it to WebP with the renderer and uploads
+ * Downloads one attachment, shrinks it to AVIF with the renderer and uploads
  * it. If the renderer can't be reached, an image already within the server's
  * 5 MB is uploaded as it is, so submissions don't depend on the renderer.
  */
@@ -469,7 +469,7 @@ async function uploadImage(a: AttachmentRef, api: PlasmaTrackApi, interaction: I
     throw err;
   }
   const type = sniffImageType(bytes);
-  if (!type) throw new UserFacingError(`The ${label} file isn’t a PNG, JPEG or WebP image.`);
+  if (!type) throw new UserFacingError(`The ${label} file isn’t a PNG, JPEG, WebP or AVIF image.`);
 
   let out: { bytes: Uint8Array<ArrayBuffer>; contentType: string } = { bytes, contentType: type };
   try {

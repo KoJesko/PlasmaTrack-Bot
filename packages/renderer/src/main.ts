@@ -1,6 +1,8 @@
 // Renderer service entry point: `npm start -w @plasmatrack/renderer`.
 // Configuration: environment variables (see renderer.env.example).
 
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createLogger } from '@plasmatrack/core';
 import { parseRendererConfig } from './config.ts';
 import { Limiter } from './limiter.ts';
@@ -23,11 +25,21 @@ for (const [game, path] of [['ets2', config.TILES_ETS2], ['ats', config.TILES_AT
   logger.info('basemap loaded', { game, path, minZoom: source.minZoom, maxZoom: source.maxZoom });
 }
 
+const routes = new RouteRenderer({ tiles, stripFlags: config.STRIP_FLAGS, logger });
 const server = createRendererServer({
   key: config.RENDERER_KEY,
-  routes: new RouteRenderer({ tiles, stripFlags: config.STRIP_FLAGS, logger }),
+  routes,
   limiter: new Limiter(config.RENDER_CONCURRENCY, config.RENDER_QUEUE_LIMIT),
   logger,
+  // On Cloudflare the container starts empty and its Durable Object uploads the basemaps.
+  basemaps: {
+    dir: config.TILES_DIR ?? join(tmpdir(), 'plasmatrack-tiles'),
+    async load(game, path) {
+      const source = await PMTilesFileSource.open(path);
+      routes.setBasemap(game, new StrippingTileSource(source, config.STRIP_FLAGS));
+      logger.info('basemap loaded', { game, path, minZoom: source.minZoom, maxZoom: source.maxZoom });
+    },
+  },
 });
 
 server.listen(config.RENDERER_PORT, config.RENDERER_HOST, () => {

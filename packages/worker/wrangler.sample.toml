@@ -25,6 +25,29 @@ migrations_dir = "migrations"
 binding = "RENDER_CACHE"
 bucket_name = "plasmatrack-render-cache"
 
+# Private basemaps (ets2.pmtiles, ats.pmtiles) the renderer container loads when it starts.
+[[r2_buckets]]
+binding = "TILES"
+bucket_name = "plasmatrack-tiles"
+
+# The renderer as a Cloudflare Container (docs/DEPLOY.md §2). It has no public address:
+# the bot reaches it through the RENDERER binding, and it stops 30 s after its last
+# request. Fill in the image that .github/workflows/renderer-image.yml printed, then
+# uncomment all three blocks. Until then, RENDERER_URL below is used.
+# [[containers]]
+# class_name = "RendererContainer"
+# image = "registry.cloudflare.com/<account id>/plasmatrack-renderer:<tag>"
+# instance_type = "basic"      # 1/4 vCPU, 1 GiB
+# max_instances = 1
+#
+# [[durable_objects.bindings]]
+# name = "RENDERER"
+# class_name = "RendererContainer"
+#
+# [[migrations]]
+# tag = "renderer-v1"
+# new_sqlite_classes = ["RendererContainer"]
+
 # Deferred work: everything slower than Discord's 3-second window.
 [[queues.producers]]
 binding = "WORK_QUEUE"
@@ -58,7 +81,8 @@ crons = ["17 3 * * *"]
 DISCORD_APPLICATION_ID = "<application id>"
 DISCORD_PUBLIC_KEY = "<application public key, 64 hex chars>"
 NOTICE_TTL_DAYS = "30"
-RENDERER_URL = "https://<your renderer host>"
+# Only used without the RENDERER container binding (a renderer hosted elsewhere).
+RENDERER_URL = "https://renderer.invalid"
 
 # One table per Discord server. Commands work only in these servers (never in DMs), and
 # every command except /about needs one of the listed roles. With no member_roles, only

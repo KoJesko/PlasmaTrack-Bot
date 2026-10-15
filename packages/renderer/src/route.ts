@@ -35,6 +35,11 @@ export class RouteRenderer {
     return this.options.tiles[game] !== undefined;
   }
 
+  /** Swaps in a basemap (e.g. one uploaded at start-up); later renders use it. */
+  setBasemap(game: Game, tiles: TileSource): void {
+    this.options.tiles[game] = tiles;
+  }
+
   async render(req: ParsedRouteRenderRequest): Promise<RenderedRoute> {
     const tiles = this.options.tiles[req.game];
     const points: LonLat[] = req.route.features.flatMap((f) => f.geometry.coordinates.map((c) => [c[0]!, c[1]!] as const));

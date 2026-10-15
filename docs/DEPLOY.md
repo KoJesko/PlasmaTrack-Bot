@@ -1,7 +1,7 @@
 # Deploy
 
-The bot has two parts: the **Worker** (Cloudflare Workers Paid plan) and the **renderer**
-(any host that runs Node 24 with MapLibre Native). Secrets never go in the repo: Worker
+The bot has two parts, both on Cloudflare (Workers Paid plan): the **Worker** and the
+**renderer**, a Container attached to it. Secrets never go in the repo: Worker
 secrets go in Cloudflare's secret store, and renderer secrets in its environment.
 
 ## 1. Discord application
@@ -13,38 +13,49 @@ secrets go in Cloudflare's secret store, and renderer secrets in its environment
    No privileged intents are needed: the bot uses HTTP interactions only, never the Gateway.
 4. Note the **server (guild) ID** and the **moderator role IDs** (Developer Mode → right-click → Copy ID).
 
-## 2. Renderer
+## 2. Renderer (a Cloudflare Container)
 
-On the host of your choice:
+The renderer draws maps and charts and shrinks evidence images to AVIF. It needs native code
+(MapLibre Native, sharp), so it can't run inside a Worker. Instead it runs as a
+[Cloudflare Container](https://developers.cloudflare.com/containers/) attached to the bot
+Worker:
+- **No public address and no domain:** only the bot reaches it, through the `RENDERER`
+  Durable Object binding (`packages/worker/src/renderer-container.ts`).
+- **Start-up:** on the first request after it stopped, the Durable Object starts it, waits
+  for `/healthz`, and streams the basemaps in from the private `plasmatrack-tiles` R2
+  bucket.
+- **Idle stop:** it stops 30 seconds after the last request. Most maps therefore start it
+  cold, which adds several seconds; images aren't urgent.
+- **Instance:** `basic` (1/4 vCPU, 1 GiB), one instance. It draws one image at a time and
+  queues the rest.
 
-    git clone <this repo> plasmatrack-bot
-    cd plasmatrack-bot
-    npm install
-    cp packages/renderer/renderer.env.example packages/renderer/renderer.env
-    # RENDERER_KEY: <shared secret, at least 32 random characters; same value as the Worker's RENDERER_KEY>
-    # TILES_ETS2 / TILES_ATS: your basemaps (docs/TILES.md)
-    npm start -w @plasmatrack/renderer
+**Image:** `packages/renderer/Dockerfile`, built by GitHub Actions
+(`.github/workflows/renderer-image.yml`), so no Docker is needed on your PC. On every push to
+`main` that touches the renderer, the workflow builds the image, smoke-tests it (a map, a chart
+and an AVIF), and pushes it to Cloudflare's private registry. Its summary prints the image
+reference.
 
-- Put it behind a TLS-terminating reverse proxy, and keep `RENDERER_HOST=127.0.0.1` unless
-  something else restricts access. Every request must carry a valid HMAC signature
-  (5-minute window), so the endpoint is useless to anyone without the key.
-- Run it under a process supervisor (systemd, a Windows service, a container runtime). It
-  exits cleanly on SIGINT/SIGTERM.
-- `GET /healthz` reports whether each game's basemap loaded.
-- Sizing: a small test render took about 0.2 s on the development PC; real basemaps will be slower. Start with
-  `RENDER_CONCURRENCY=2`.
+**One-time setup:**
+1. **Token:** create a Cloudflare account API token from the "Edit Cloudflare Workers" template,
+   scoped to your account. If the push step is refused, add the Containers permission.
+2. **GitHub secrets:** add the token as `CLOUDFLARE_API_TOKEN` and your account ID as
+   `CLOUDFLARE_ACCOUNT_ID`.
+3. **Basemaps:** upload them (docs/TILES.md):
 
-**Or with Docker** (`packages/renderer/Dockerfile`, Ubuntu 24.04 with a virtual display for
-MapLibre Native). Build it from the repository root:
+       npx wrangler r2 bucket create plasmatrack-tiles
+       npx wrangler r2 object put plasmatrack-tiles/ets2.pmtiles --file <ets2.pmtiles> --remote
+       npx wrangler r2 object put plasmatrack-tiles/ats.pmtiles --file <ats.pmtiles> --remote
 
-    docker build -f packages/renderer/Dockerfile -t plasmatrack-renderer .
-    docker run -d --name plasmatrack-renderer --restart unless-stopped \
-      -e RENDERER_KEY=<the shared key> -p 127.0.0.1:8788:8788 \
-      -v /srv/plasmatrack/tiles:/tiles:ro plasmatrack-renderer
+4. **First image:** push to `main`, or run the workflow by hand. Copy the image reference into
+   `[[containers]] image` in `packages/worker/wrangler.toml`, uncomment the container blocks
+   there, and run `npx wrangler deploy`.
 
-The image expects `/tiles/ets2.pmtiles` and `/tiles/ats.pmtiles`, and has a health check on
-`/healthz`. Put the same TLS reverse proxy in front of it. The image hasn't been built or run
-yet; headless Linux rendering is unverified (docs/BUILD.md).
+**After that:** for each new renderer image, update the image reference and deploy again.
+
+**Elsewhere instead:** the same image runs on any Docker host. Mount the basemaps and set
+`TILES_ETS2`/`TILES_ATS`, put a TLS reverse proxy in front, and set the Worker's
+`RENDERER_URL` without the container blocks. Locally, `npm start -w @plasmatrack/renderer`
+uses `packages/renderer/renderer.env` (docs/BUILD.md).
 
 ## 3. Cloudflare resources
 

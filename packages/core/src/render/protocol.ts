@@ -9,7 +9,7 @@ export const RENDER_PROTOCOL_VERSION = 2;
 
 export const ROUTE_PATH = '/v1/render/route';
 export const CHART_PATH = '/v1/render/chart';
-/** Body: the raw image (PNG, JPEG or WebP). Answer: WebP, at most COMPRESSED_MAX_EDGE px on the long side. */
+/** Body: the raw image (PNG, JPEG, WebP or AVIF). Answer: AVIF, at most COMPRESSED_MAX_EDGE px on the long side. */
 export const COMPRESS_PATH = '/v1/compress/image';
 export const COMPRESSED_MAX_EDGE = 1920;
 /** Largest image the renderer accepts for compression. */
@@ -179,6 +179,23 @@ export async function signRendererRequest(
   const timestamp = String(Math.floor(nowSeconds));
   const signature = bytesToHex(await hmac(key, await signatureBase(timestamp, method, path, body)));
   return { [TIMESTAMP_HEADER]: timestamp, [SIGNATURE_HEADER]: signature };
+}
+
+/**
+ * Basemap uploads (PUT /v1/tiles/{game}, used by the Cloudflare container's
+ * Durable Object at start-up) are streams of ~100 MB, so instead of a body
+ * signature they carry a token derived from the shared key.
+ */
+export const TILES_PATH = /^\/v1\/tiles\/(ets2|ats)$/;
+export const TILES_AUTH_HEADER = 'X-PT-Tiles-Auth';
+
+export async function tilesUploadToken(key: string, game: string): Promise<string> {
+  return bytesToHex(await hmac(key, `tiles-upload:${game}`));
+}
+
+export async function verifyTilesUploadToken(key: string, game: string, token: string | null | undefined): Promise<boolean> {
+  if (!token || !/^[0-9a-f]{64}$/.test(token)) return false;
+  return timingSafeEqual(await hmac(key, `tiles-upload:${game}`), hexToBytes(token)!);
 }
 
 export async function verifyRendererRequest(

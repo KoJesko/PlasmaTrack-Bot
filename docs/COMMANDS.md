@@ -44,7 +44,7 @@ don't count. Past the limit, the bot asks you to wait a few seconds.
    - **mod_names**, separated by commas;
    - a **custom_map** image;
    - for ETS2, the **UK stretch**: `uk_distance`, `uk_entry_city`, `uk_end_city` and `uk_route_evidence`, all four (a GPS route screenshot counts). It is counted at scale 15.
-2. The bot checks the values. It shrinks every image to WebP (at most 1920 px, location data removed) and shows you a private preview.
+2. The bot checks the values. It shrinks every image to AVIF (at most 1920 px, location data removed); AVIF uploads are shrunk too and shows you a private preview.
 3. Drove part of it on another map scale? Add it with `/submit adjusted-scale` (cities, distance, scale and a screenshot). You get a new preview.
 4. Press **Send**. The job goes to the moderators as "In review"; its points are held until approved. **Cancel**, or waiting an hour, drops it.
 

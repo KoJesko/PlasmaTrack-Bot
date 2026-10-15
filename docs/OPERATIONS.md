@@ -13,6 +13,7 @@ Commands below run from `packages/worker` unless noted.
 | Logs | Cloudflare dashboard → Workers → plasmatrack-bot → Logs; live: `npx wrangler tail` |
 | Database | D1 `plasmatrack-bot` (contents: [DATA.md](DATA.md)) |
 | Queues | `plasmatrack-work`, plus `plasmatrack-work-dlq` for messages that failed every try |
+| Renderer | Cloudflare Container `RendererContainer` behind the Worker; images from `.github/workflows/renderer-image.yml`; basemaps in R2 `plasmatrack-tiles` |
 
 ## A user reports an error
 
@@ -82,6 +83,18 @@ into `packages/core/test/fixtures/server-examples/`. Then:
 2. Read the "Changes" section at the end of `API_CONVENTIONS.md`.
 3. Run `npm run check`. `contract-examples.test.ts` fails if any real response no longer
    parses with the bot's schemas.
+
+## Update the renderer
+
+1. Push the change to `main`. The "Renderer image" workflow builds, smoke-tests and pushes the
+   image; its summary shows the reference.
+2. Put that reference in `[[containers]] image` in `packages/worker/wrangler.toml`.
+3. Run `npx wrangler deploy`. The running container is replaced; the next request starts the
+   new one.
+
+New basemaps: upload them over the old ones (`npx wrangler r2 object put
+plasmatrack-tiles/<game>.pmtiles --file … --remote`). A running container keeps the old ones
+until it stops, which happens 30 s after its last request.
 
 ## Limits and retries
 

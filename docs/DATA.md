@@ -29,7 +29,7 @@ A daily cron (03:17 UTC) deletes expired rows.
 ## Evidence images (`/submit`)
 
 - **Shrinking:** the bot downloads the attachments from Discord and the renderer shrinks them
-  to WebP, removing their metadata (EXIF, including GPS). The bot uploads them straight to the
+  to AVIF, removing their metadata (EXIF, including GPS). The bot uploads them straight to the
   PlasmaTrack server, which stores them. The bot keeps no copy.
 - **Fallback:** if the renderer can't be reached, an image already under 5 MB is uploaded at
   full size, with its metadata blocks (EXIF, XMP, text) cut out by the bot. The pixels are
@@ -43,6 +43,11 @@ A daily cron (03:17 UTC) deletes expired rows.
   (e.g. 30 days); expiry only costs a re-render.
 - **TruckersMP lookups:** public profile data (name, linked Discord ID, ban flag) for accounts
   the tracker reported. Re-fetched after 24 hours.
+
+## R2 bucket (`plasmatrack-tiles`)
+
+The two basemaps (`ets2.pmtiles`, `ats.pmtiles`), private. The renderer container copies
+them to its own disk when it starts; the copy disappears when it stops.
 
 ## Queue (`plasmatrack-work`)
 

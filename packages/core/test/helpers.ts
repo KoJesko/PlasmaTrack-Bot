@@ -196,6 +196,13 @@ export class FakeDiscord implements DiscordSender {
   }
 }
 
+/** A tiny but valid-looking AVIF (…ftypavif) of `size` bytes. */
+export function fakeAvif(size = 64): Uint8Array<ArrayBuffer> {
+  const b = new Uint8Array(Math.max(size, 16));
+  b.set([0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66], 0);
+  return b;
+}
+
 /** A tiny but valid-looking WebP (RIFF…WEBP) of `size` bytes. */
 export function fakeWebp(size = 64): Uint8Array<ArrayBuffer> {
   const b = new Uint8Array(Math.max(size, 16));
@@ -237,14 +244,14 @@ export function taskDeps(clock = new FakeClock()) {
     renderRoute: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
     renderChart: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
   };
-  /** Images "compressed" by the fake: a WebP header plus the input's length. */
+  /** Images "compressed" by the fake: an AVIF header plus the input's length. */
   const images: ImageCompressor & { calls: number; fail: Error | null } = {
     calls: 0,
     fail: null,
     async compressImage(bytes) {
       this.calls++;
       if (this.fail) throw this.fail;
-      return { bytes: fakeWebp(bytes.length), contentType: 'image/webp' as const };
+      return { bytes: fakeAvif(bytes.length), contentType: 'image/avif' as const };
     },
   };
   /** URL → file. Discord attachments and evidence links in tests come from here. */

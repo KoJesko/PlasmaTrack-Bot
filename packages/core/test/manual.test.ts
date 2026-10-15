@@ -121,7 +121,7 @@ describe('/submit job: checks before anything is uploaded', () => {
     );
     const text = response.data!.content!;
     expect(text).toContain('The UK fields are for ETS2 only');
-    expect(text).toContain('`custom_map` must be a PNG, JPEG or WebP image');
+    expect(text).toContain('`custom_map` must be a PNG, JPEG, WebP or AVIF image');
     expect(text).toContain('`date_ended` must be after `date_started`');
   });
 
@@ -148,8 +148,8 @@ describe('/submit flow', () => {
     expect(first.response.type).toBe(5); // deferred, private
     expect(s.images.calls).toBe(3);
     expect(s.server.evidence.size).toBe(3);
-    // The renderer's WebP was uploaded, not the original PNG.
-    expect([...s.server.evidence.values()].every((e) => e.content_type === 'image/webp')).toBe(true);
+    // The renderer's AVIF was uploaded, not the original PNG.
+    expect([...s.server.evidence.values()].every((e) => e.content_type === 'image/avif')).toBe(true);
 
     const preview = first.sent!;
     expect(preview.flags! & EPHEMERAL).toBeTruthy();
@@ -163,7 +163,7 @@ describe('/submit flow', () => {
     expect(field('Profit')).toBe('€15,000');
     expect(field('Mods')).toBe('Map A, Trucks B');
     expect(preview.embeds!.slice(1).map((e) => e.title)).toEqual(['Evidence', 'Custom map', 'UK route']);
-    expect(first.files.map((f) => f.name)).toEqual(['main.webp', 'custom_map.webp', 'uk_route.webp']);
+    expect(first.files.map((f) => f.name)).toEqual(['main.avif', 'custom_map.avif', 'uk_route.avif']);
     const [send1, cancel] = buttons(preview);
     expect(send1).toMatch(/^msub:send:[0-9a-f-]{36}:1$/);
     expect(cancel).toMatch(/^msub:cancel:/);
@@ -255,8 +255,8 @@ describe('manual jobs in /job and the evidence button', () => {
     const shown = await s.run(commandInteraction('job', { user: OTHER_ID, id: id(), options: [opt('id', jobId)] }));
     const embed = shown.sent!.embeds![0]!;
     expect(embed.description).toContain('Submitted by hand');
-    expect(embed.image).toEqual({ url: 'attachment://custom-map.webp' });
-    expect(shown.files.map((f) => f.name)).toEqual(['custom-map.webp']);
+    expect(embed.image).toEqual({ url: 'attachment://custom-map.avif' });
+    expect(shown.files.map((f) => f.name)).toEqual(['custom-map.avif']);
     const evidenceButton = buttons(shown.sent)[0]!;
     expect(evidenceButton).toBe(`mev:${jobId}`);
 
@@ -323,7 +323,7 @@ describe('manual jobs in /job and the evidence button', () => {
     expect(sheet.value).toContain('Map scale: 1:19 (default)');
     expect(main.fields!.find((f) => f.name === 'Custom map')!.value).toBe('Public in /job');
     expect(r.sent!.embeds!.slice(1).map((e) => e.title).sort()).toEqual(['Custom map', 'Evidence']);
-    expect(r.files.map((f) => f.name).sort()).toEqual(['custom_map-2.webp', 'main-1.webp']);
+    expect(r.files.map((f) => f.name).sort()).toEqual(['custom_map-2.avif', 'main-1.avif']);
   });
 });
 

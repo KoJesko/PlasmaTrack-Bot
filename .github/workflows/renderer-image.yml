@@ -1,0 +1,66 @@
+name: Renderer image
+
+# Builds the renderer's container image and pushes it to Cloudflare's private
+# registry, for the bot Worker's container (docs/DEPLOY.md §2). The Worker is
+# deployed separately with `wrangler deploy`, pointing `[[containers]] image`
+# at the tag this prints.
+#
+# Secrets: CLOUDFLARE_API_TOKEN (account token that can push container images)
+# and CLOUDFLARE_ACCOUNT_ID.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/renderer/**
+      - packages/core/src/**
+      - package-lock.json
+      - .github/workflows/renderer-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renderer-image
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Build
+        run: docker build --platform linux/amd64 -f packages/renderer/Dockerfile -t "plasmatrack-renderer:${GITHUB_SHA::12}" .
+
+      - name: Smoke test (starts, draws a map and an AVIF)
+        run: |
+          docker run -d --name smoke -e RENDERER_KEY=smoke-test-key-0123456789abcdef0123 -p 127.0.0.1:8788:8788 "plasmatrack-renderer:${GITHUB_SHA::12}"
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8788/healthz && break; sleep 1; done
+          RENDERER_URL=http://127.0.0.1:8788 RENDERER_KEY=smoke-test-key-0123456789abcdef0123 node packages/renderer/scripts/smoke.ts
+          docker logs smoke
+          docker rm -f smoke
+
+      - name: Push to Cloudflare's registry
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: packages/worker
+        run: |
+          npx wrangler containers push "plasmatrack-renderer:${GITHUB_SHA::12}" | tee push.log
+          {
+            echo "### Renderer image pushed"
+            echo
+            echo 'Set this in packages/worker/wrangler.toml under [[containers]], then run `npx wrangler deploy`:'
+            echo
+            echo '```'
+            grep -Eo 'registry\.cloudflare\.com/[^ ]+' push.log | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

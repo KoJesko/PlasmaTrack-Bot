@@ -27,8 +27,8 @@ export interface ImageRenderer {
 
 /** Shrinks evidence images before they are uploaded (the renderer does it with sharp). */
 export interface ImageCompressor {
-  /** WebP, at most 1920 px on the long side, metadata (e.g. GPS) removed. */
-  compressImage(bytes: Uint8Array<ArrayBuffer>, contentType: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: 'image/webp' }>;
+  /** AVIF (owner, 2026-10-15), at most 1920 px on the long side, metadata (e.g. GPS) removed. */
+  compressImage(bytes: Uint8Array<ArrayBuffer>, contentType: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: 'image/avif' }>;
 }
 
 /** The renderer could read the request but not the image: retrying won't help. */
@@ -71,7 +71,7 @@ export class RendererClient implements ImageRenderer, ImageCompressor {
     return this.render(CHART_PATH, 'chart', chartRenderRequestSchema.parse(request));
   }
 
-  async compressImage(bytes: Uint8Array<ArrayBuffer>, contentType: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: 'image/webp' }> {
+  async compressImage(bytes: Uint8Array<ArrayBuffer>, contentType: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: 'image/avif' }> {
     const headers = {
       'Content-Type': contentType,
       ...(await signRendererRequest(this.options.key, 'POST', COMPRESS_PATH, bytes, this.clock.now() / 1000)),
@@ -91,8 +91,8 @@ export class RendererClient implements ImageRenderer, ImageCompressor {
     if (res.status === 400 || res.status === 413 || res.status === 415) throw new ImageRejectedError(`renderer rejected the image (${res.status})`);
     if (!res.ok) throw new Error(`renderer rejected the compress request (${res.status})`);
     const out = new Uint8Array(await res.arrayBuffer());
-    if (sniffImageType(out) !== 'image/webp') throw new Error('renderer returned something that is not WebP');
-    return { bytes: out, contentType: 'image/webp' };
+    if (sniffImageType(out) !== 'image/avif') throw new Error('renderer returned something that is not AVIF');
+    return { bytes: out, contentType: 'image/avif' };
   }
 
   private async render(path: string, kind: string, request: unknown): Promise<RenderedImage> {

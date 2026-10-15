@@ -15,6 +15,8 @@ export const rendererConfigSchema = z.object({
   /** Basemap archives generated with truckermudgeon/maps (ets2.pmtiles / ats.pmtiles). */
   TILES_ETS2: z.string().optional(),
   TILES_ATS: z.string().optional(),
+  /** Where uploaded basemaps (PUT /v1/tiles/{game}) are written. */
+  TILES_DIR: z.string().optional(),
   /** Feature properties that hide a basemap feature when true. */
   STRIP_FLAGS: flagList.default(['hidden', 'secret']),
   RENDER_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),

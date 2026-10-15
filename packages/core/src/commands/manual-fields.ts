@@ -18,7 +18,7 @@ const L_PER_GAL: Record<FuelUnit, number> = { l: 1, us_gal: 3.785411784, uk_gal:
 const FUEL_LABEL: Record<FuelUnit, string> = { l: 'L', us_gal: 'US gal', uk_gal: 'UK gal' };
 
 /** Images the server accepts (it checks the bytes; so do we). */
-export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/avif'] as const;
 /** Largest attachment the bot downloads for compression. */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 /** The server's limit per image, after compression. */

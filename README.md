@@ -18,7 +18,7 @@ PlasmaTrack server ──webhooks──▶  │  answers within 3 s (Discord)   
                                   │  or 10 s (server): checks the    │  renders, DMs; then edits the reply
                                   │  signature, then queues          │
                                   ▼                                 ▼
-                              D1: notices, dedupe,         Renderer service (any host)
+                              D1: notices, dedupe,         Renderer (Cloudflare Container)
                                   job versions, grants,    PMTiles basemaps + MapLibre Native → PNG
                                   review posts, rate limits
                               R2: rendered PNG cache
@@ -28,7 +28,7 @@ PlasmaTrack server ──webhooks──▶  │  answers within 3 s (Discord)   
 |---|---|
 | `packages/core` | Platform-free logic: interaction routing, tasks, Discord REST, storage ports, renderer protocol and client, PlasmaTrack server API client, webhook verification and handling. No Cloudflare or Node imports (enforced by a test). |
 | `packages/worker` | Cloudflare Worker: `POST /interactions`, `POST /webhooks/plasmatrack`, queue consumer, daily cleanup. The only place that knows about D1, Queues and R2 (`src/adapters.ts`). |
-| `packages/renderer` | Node service that draws route maps (PMTiles + MapLibre Native) and speed/fuel charts (SVG via resvg). Runs on any host with Node 24. |
+| `packages/renderer` | Node service that draws route maps (PMTiles + MapLibre Native) and speed/fuel charts (SVG via resvg), and shrinks evidence images to AVIF (sharp). Runs as a Cloudflare Container behind the Worker (no public address), or on any host with Node 24. |
 
 Key behaviour:
 - **Discord's 3-second deadline.** Command handlers are synchronous and get no I/O, so the first response is always immediate. Anything that needs I/O replies "thinking…" and runs from the queue.
@@ -42,7 +42,7 @@ Key behaviour:
 - **Moderator writes** need a reason: a required `reason` option on slash commands, or a reason form for buttons. Decisions send the job's version tag, so one made from an outdated view is refused instead of overwriting another moderator's.
 - **Moderator-issued tokens** are never shown to the moderator: the player gets a "Get your token" button (by DM, or in `/notices` if DMs are closed), and the token is created when they click.
 - **Server webhooks** are verified (HMAC-SHA256, 5-minute window, two secrets during a rotation), deduplicated on `event_id`, and handled from the queue. Player notifications and revocation notices are DMed immediately: the server has already applied its 5–30 s delay.
-- **Manual submissions:** `/submit` collects a job by hand with evidence screenshots. The renderer shrinks them to WebP and removes their metadata, the server stores them, and a moderator approves or declines with `/approve-manual` (which can correct stats and hide the custom map) or `/decline-manual`. Evidence is shown only to moderators and the submitter; the custom map is public unless hidden.
+- **Manual submissions:** `/submit` collects a job by hand with evidence screenshots. The renderer shrinks them to AVIF and removes their metadata, the server stores them, and a moderator approves or declines with `/approve-manual` (which can correct stats and hide the custom map) or `/decline-manual`. Evidence is shown only to moderators and the submitter; the custom map is public unless hidden.
 - **Corrections:** `/edit-job` changes any field of any job; the server keeps edits through recalculations. `/post-approve` and `/post-decline` reverse earlier decisions.
 - **Limits and failures:** 5 slash commands per user per 20 seconds. Failed work is retried; if it still fails on the last try, or would outlive Discord's 15-minute window, the user is told instead of being left on "thinking…". Error replies carry a reference that matches the logs.
 - **Route images** colour each stretch by the server's `scale_class` and are always drawn over the vanilla map. A misaligned route is itself the sign of a 1:1 or modded map. Hidden and secret basemap features are removed before drawing. Every image carries the credits.

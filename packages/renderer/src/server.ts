@@ -1,4 +1,9 @@
+import { createWriteStream } from 'node:fs';
+import { mkdir, rename, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import {
   CHART_PATH,
   chartRenderRequestSchema,
@@ -7,8 +12,11 @@ import {
   ROUTE_PATH,
   routeRenderRequestSchema,
   SIGNATURE_HEADER,
+  TILES_AUTH_HEADER,
+  TILES_PATH,
   TIMESTAMP_HEADER,
   verifyRendererRequest,
+  verifyTilesUploadToken,
   type Logger,
 } from '@plasmatrack/core';
 import { renderChart } from './chart.ts';
@@ -17,6 +25,8 @@ import { Limiter, QueueFullError } from './limiter.ts';
 import type { RouteRenderer } from './route.ts';
 
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;
+/** Basemaps are ~50–100 MB each. */
+export const MAX_TILES_BYTES = 1024 * 1024 * 1024;
 
 export interface ServerDeps {
   key: string;
@@ -24,6 +34,8 @@ export interface ServerDeps {
   limiter: Limiter;
   logger: Logger;
   nowSeconds?: () => number;
+  /** Accept basemap uploads into this folder, then open them with `load`. */
+  basemaps?: { dir: string; load(game: 'ets2' | 'ats', path: string): Promise<void> };
 }
 
 class HttpError extends Error {
@@ -65,6 +77,42 @@ function sendJson(res: ServerResponse, status: number, body: unknown, headers: R
   res.end(JSON.stringify(body));
 }
 
+/** Streams an uploaded basemap to disk (never into memory), then loads it. */
+async function receiveBasemap(
+  req: IncomingMessage,
+  res: ServerResponse,
+  game: 'ets2' | 'ats',
+  key: string,
+  basemaps: NonNullable<ServerDeps['basemaps']>,
+  logger: Logger,
+) {
+  if (!(await verifyTilesUploadToken(key, game, req.headers[TILES_AUTH_HEADER.toLowerCase()] as string | undefined))) {
+    req.resume();
+    throw new HttpError(401, 'invalid basemap upload token');
+  }
+  await mkdir(basemaps.dir, { recursive: true });
+  const final = join(basemaps.dir, `${game}.pmtiles`);
+  const part = `${final}.part`;
+  let size = 0;
+  const limit = new Transform({
+    transform(chunk: Buffer, _enc, done) {
+      size += chunk.length;
+      done(size > MAX_TILES_BYTES ? new HttpError(413, 'basemap too large') : null, chunk);
+    },
+  });
+  try {
+    await pipeline(req, limit, createWriteStream(part));
+    await rename(part, final);
+    await basemaps.load(game, final);
+  } catch (err) {
+    await rm(part, { force: true });
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(400, `basemap rejected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  logger.info('basemap uploaded', { game, bytes: size });
+  sendJson(res, 200, { ok: true, game, bytes: size });
+}
+
 export function createRendererServer(deps: ServerDeps): Server {
   const now = deps.nowSeconds ?? (() => Date.now() / 1000);
 
@@ -73,6 +121,11 @@ export function createRendererServer(deps: ServerDeps): Server {
 
     if (req.method === 'GET' && path === '/healthz') {
       sendJson(res, 200, { ok: true, basemaps: { ets2: deps.routes.hasBasemap('ets2'), ats: deps.routes.hasBasemap('ats') } });
+      return;
+    }
+    const tilesMatch = TILES_PATH.exec(path);
+    if (req.method === 'PUT' && tilesMatch && deps.basemaps) {
+      await receiveBasemap(req, res, tilesMatch[1] as 'ets2' | 'ats', deps.key, deps.basemaps, deps.logger);
       return;
     }
     if (req.method !== 'POST' || (path !== ROUTE_PATH && path !== CHART_PATH && path !== COMPRESS_PATH)) {
@@ -95,16 +148,16 @@ export function createRendererServer(deps: ServerDeps): Server {
 
     if (path === COMPRESS_PATH) {
       const started = performance.now();
-      let webp: Uint8Array;
+      let avif: Uint8Array;
       try {
-        webp = await deps.limiter.run(() => compressImage(body));
+        avif = await deps.limiter.run(() => compressImage(body));
       } catch (err) {
         if (err instanceof UnsupportedImageError) throw new HttpError(400, err.message);
         throw err;
       }
-      deps.logger.info('compressed', { in: body.length, out: webp.length, ms: Math.round(performance.now() - started) });
-      res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': String(webp.length), 'Cache-Control': 'no-store' });
-      res.end(webp);
+      deps.logger.info('compressed', { in: body.length, out: avif.length, ms: Math.round(performance.now() - started) });
+      res.writeHead(200, { 'Content-Type': 'image/avif', 'Content-Length': String(avif.length), 'Cache-Control': 'no-store' });
+      res.end(avif);
       return;
     }
 

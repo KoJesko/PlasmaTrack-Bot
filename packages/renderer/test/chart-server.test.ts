@@ -1,13 +1,18 @@
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   chartRenderRequestSchema,
   createLogger,
   ImageRejectedError,
-  stripImageMetadata,
   MemoryBlobCache,
   RendererClient,
   ROUTE_PATH,
   signRendererRequest,
+  stripImageMetadata,
+  TILES_AUTH_HEADER,
+  tilesUploadToken,
 } from '@plasmatrack/core';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -15,6 +20,8 @@ import { chartSvg, downsample, formatDuration, niceTicks, renderChart, timeTicks
 import { Limiter, QueueFullError } from '../src/limiter.ts';
 import { RouteRenderer } from '../src/route.ts';
 import { createRendererServer } from '../src/server.ts';
+import { PMTilesFileSource } from '../src/tiles.ts';
+import { writeBasemapFixture } from './fixtures/basemap.ts';
 import { decodePng } from './helpers.ts';
 
 const KEY = 'renderer-test-key-0123456789abcdef0123';
@@ -110,7 +117,7 @@ describe('renderer HTTP service', () => {
     expect((await decodePng(chart.bytes)).height).toBe(500);
   });
 
-  it('compresses evidence images to WebP: at most 1920 px, metadata (GPS) removed', async () => {
+  it('compresses evidence images to AVIF: at most 1920 px, metadata (GPS) removed', async () => {
     const client = new RendererClient({ baseUrl: base, key: KEY, cache: new MemoryBlobCache() });
     const jpeg = new Uint8Array(
       await sharp({ create: { width: 3840, height: 2160, channels: 3, background: '#4a7' } })
@@ -121,12 +128,28 @@ describe('renderer HTTP service', () => {
     expect((await sharp(jpeg).metadata()).exif).toBeDefined();
     const out = await client.compressImage(jpeg, 'image/jpeg');
     const meta = await sharp(out.bytes).metadata();
-    expect(meta.format).toBe('webp');
+    expect(meta.format).toBe('heif');
+    expect(meta.compression).toBe('av1');
     expect([meta.width, meta.height]).toEqual([1920, 1080]);
     expect(meta.exif).toBeUndefined();
     // Small images are not enlarged.
     const small = new Uint8Array(await sharp({ create: { width: 200, height: 100, channels: 3, background: '#000' } }).png().toBuffer());
     expect((await sharp((await client.compressImage(small, 'image/png')).bytes).metadata()).width).toBe(200);
+  });
+
+  it('re-compresses AVIF uploads too (shrinks them; never passes them through)', async () => {
+    const client = new RendererClient({ baseUrl: base, key: KEY, cache: new MemoryBlobCache() });
+    const bigAvif = new Uint8Array(
+      await sharp({ create: { width: 4000, height: 3000, channels: 3, background: '#357' } })
+        .avif({ quality: 100, effort: 0 })
+        .withExif({ IFD0: { Make: 'TestCam' } })
+        .toBuffer(),
+    );
+    const out = await client.compressImage(bigAvif, 'image/avif');
+    const meta = await sharp(out.bytes).metadata();
+    expect([meta.width, meta.height]).toEqual([1920, 1440]);
+    expect(meta.exif).toBeUndefined();
+    expect(out.contentType).toBe('image/avif');
   });
 
   it('the bot’s fallback strips EXIF/GPS from real JPEG and WebP files, which still decode', async () => {
@@ -139,6 +162,45 @@ describe('renderer HTTP service', () => {
       expect(meta.exif).toBeUndefined();
       expect([meta.width, meta.height]).toEqual([64, 32]);
       await sharp(out).raw().toBuffer(); // the pixels are intact
+    }
+  });
+
+  it('accepts a basemap upload only with the key-derived token, streams it to disk and loads it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pt-tiles-'));
+    const loaded: string[] = [];
+    const routes = new RouteRenderer({ tiles: {}, stripFlags: ['hidden', 'secret'], logger });
+    const up = createRendererServer({
+      key: KEY,
+      routes,
+      limiter: new Limiter(1, 1),
+      logger,
+      basemaps: {
+        dir,
+        async load(game, path) {
+          loaded.push(`${game}:${path}`);
+          routes.setBasemap(game, await PMTilesFileSource.open(path));
+        },
+      },
+    });
+    await new Promise<void>((resolve) => up.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${(up.address() as AddressInfo).port}/v1/tiles/ats`;
+    try {
+      const body = readFileSync(writeBasemapFixture());
+      expect((await fetch(url, { method: 'PUT', body })).status).toBe(401);
+      expect((await fetch(url, { method: 'PUT', body, headers: { [TILES_AUTH_HEADER]: await tilesUploadToken(KEY, 'ets2') } })).status).toBe(401);
+      const ok = await fetch(url, { method: 'PUT', body, headers: { [TILES_AUTH_HEADER]: await tilesUploadToken(KEY, 'ats') } });
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toEqual({ ok: true, game: 'ats', bytes: body.length });
+      expect(loaded).toEqual([`ats:${join(dir, 'ats.pmtiles')}`]);
+      expect(routes.hasBasemap('ats')).toBe(true);
+      // Something that isn't a basemap is refused and leaves nothing behind.
+      const bad = await fetch(url.replace('ats', 'ets2'), { method: 'PUT', body: 'not tiles', headers: { [TILES_AUTH_HEADER]: await tilesUploadToken(KEY, 'ets2') } });
+      expect(bad.status).toBe(400);
+      expect(routes.hasBasemap('ets2')).toBe(false);
+      expect(readdirSync(dir).sort()).toEqual(['ats.pmtiles', 'ets2.pmtiles']);
+    } finally {
+      await new Promise<void>((resolve) => up.close(() => resolve()));
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

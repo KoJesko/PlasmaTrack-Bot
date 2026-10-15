@@ -63,8 +63,10 @@ export class HttpMediaFetcher implements MediaFetcher {
   }
 }
 
-/** The image type from a file's first bytes (PNG, JPEG or WebP), or null. */
-export function sniffImageType(bytes: Uint8Array): 'image/png' | 'image/jpeg' | 'image/webp' | null {
+export type ImageType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/avif';
+
+/** The image type from a file's first bytes (PNG, JPEG, WebP or AVIF), or null. */
+export function sniffImageType(bytes: Uint8Array): ImageType | null {
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png';
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (
@@ -73,6 +75,15 @@ export function sniffImageType(bytes: Uint8Array): 'image/png' | 'image/jpeg' | 
     String.fromCharCode(bytes[8]!, bytes[9]!, bytes[10]!, bytes[11]!) === 'WEBP'
   ) {
     return 'image/webp';
+  }
+  // ISO-BMFF "ftyp" box with an AVIF brand (still or sequence), as the major
+  // brand or a compatible one (e.g. "mif1" files listing "avif"), like the server.
+  if (bytes.length >= 12 && String.fromCharCode(bytes[4]!, bytes[5]!, bytes[6]!, bytes[7]!) === 'ftyp') {
+    const size = Math.min(((bytes[0]! << 24) | (bytes[1]! << 16) | (bytes[2]! << 8) | bytes[3]!) >>> 0, bytes.length, 256);
+    const brand = (o: number) => String.fromCharCode(bytes[o]!, bytes[o + 1]!, bytes[o + 2]!, bytes[o + 3]!);
+    const brands = [brand(8)];
+    for (let o = 16; o + 4 <= size; o += 4) brands.push(brand(o));
+    if (brands.includes('avif') || brands.includes('avis')) return 'image/avif';
   }
   return null;
 }
