@@ -85,6 +85,19 @@ describe('dumpTables', () => {
     expect(await snapshot()).toEqual(before);
   });
 
+  it('round-trips texts that look like its own line-break markers', async () => {
+    // Includes the server's test cases (its 575bcf4).
+    const texts = ['~n0~r0\r~n1\n', '~n\n0~', '~n0\n', '~r0\r', '~n0~\n~r0~\r', '\r\n\r\n~n0~~r0~'];
+    await env.DB.batch(
+      texts.map((t, i) => env.DB.prepare('INSERT INTO dedupe (key, expires_at) VALUES (?, ?)').bind(t, i)),
+    );
+    const { sql } = await dumpTables(env.DB);
+    await env.DB.exec('DELETE FROM dedupe');
+    await restore(sql);
+    const { results } = await env.DB.prepare('SELECT key FROM dedupe ORDER BY expires_at').all<{ key: string }>();
+    expect(results.map((r) => r.key)).toEqual(texts);
+  });
+
   it('leaves out short-lived tables', async () => {
     const { sql } = await dumpTables(env.DB);
     expect(sql).not.toContain('rate_limits');
