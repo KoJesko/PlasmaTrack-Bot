@@ -49,6 +49,12 @@ A daily cron (03:17 UTC) deletes expired rows.
 The two basemaps (`ets2.pmtiles`, `ats.pmtiles`), private. The renderer container copies
 them to its own disk when it starts; the copy disappears when it stops.
 
+## R2 bucket (`plasmatrack-backups`)
+
+Weekly SQL backups of the D1 tables above, except `rate_limits` and `manual_drafts`. Private;
+only the two newest are kept, so a row deleted from D1 is gone from the backups within two
+weeks. Restoring: OPERATIONS.md, "Restore a backup".
+
 ## Queue (`plasmatrack-work`)
 
 Deferred work waits here for seconds, or minutes when retrying:

@@ -33,6 +33,11 @@ bucket_name = "plasmatrack-render-cache"
 binding = "TILES"
 bucket_name = "plasmatrack-tiles"
 
+# Weekly D1 backups (src/backup.ts): the newest two SQL dumps. Private.
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "plasmatrack-backups"
+
 # The renderer as a Cloudflare Container (docs/DEPLOY.md §2). It has no public address:
 # the bot reaches it through the RENDERER binding, and it stops 30 s after its last
 # request. Fill in the image that .github/workflows/renderer-image.yml printed, then
@@ -78,7 +83,8 @@ head_sampling_rate = 1
 
 # Daily cleanup of expired dedupe rows and notices.
 [triggers]
-crons = ["17 3 * * *"]
+# Daily clean-up, and the weekly backup (BACKUP_CRON in src/index.ts).
+crons = ["17 3 * * *", "47 3 * * 0"]
 
 [vars]
 DISCORD_APPLICATION_ID = "<application id>"

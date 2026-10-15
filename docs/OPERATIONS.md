@@ -14,6 +14,7 @@ Commands below run from `packages/worker` unless noted.
 | Database | D1 `plasmatrack-bot` (contents: [DATA.md](DATA.md)) |
 | Queues | `plasmatrack-work`, plus `plasmatrack-work-dlq` for messages that failed every try |
 | Renderer | Cloudflare Container `RendererContainer` behind the Worker; images from `.github/workflows/renderer-image.yml`; basemaps in R2 `plasmatrack-tiles` |
+| Backups | R2 `plasmatrack-backups`, under `d1/plasmatrack-bot/`: the two newest weekly D1 backups |
 
 ## A user reports an error
 
@@ -95,6 +96,45 @@ into `packages/core/test/fixtures/server-examples/`. Then:
 New basemaps: upload them over the old ones (`npx wrangler r2 object put
 plasmatrack-tiles/<game>.pmtiles --file … --remote`). A running container keeps the old ones
 until it stops, which happens 30 s after its last request.
+
+## Backups
+
+Every Sunday at 03:47 UTC the Worker writes the bot's D1 tables to the private R2 bucket
+`plasmatrack-backups` as one SQL file, `d1/plasmatrack-bot/<time>.sql`. It then deletes all but
+the newest two. If a backup fails, it logs `backup failed` and deletes nothing. A successful
+one logs `backup written` with the file name, its size and the row count per table.
+
+**What's in it:** `notices`, `token_grants`, `review_posts`, `job_versions` and `dedupe`.
+`rate_limits` and `manual_drafts` live for seconds to an hour, so they're left out.
+
+**What isn't:**
+- The players, jobs, tokens and evidence, which belong to each PlasmaTrack server and are
+  backed up there.
+- The render cache, which rebuilds itself.
+- The basemaps, whose source files you keep.
+
+The backups are on Cloudflare too, so they cover a deleted or damaged database, not losing the
+Cloudflare account.
+
+### Restore a backup
+
+1. **Find the file name:** in the dashboard under R2 → plasmatrack-backups, or in the last
+   `backup written` log line.
+2. **Download it:**
+
+       npx wrangler r2 object get "plasmatrack-backups/d1/plasmatrack-bot/<time>.sql" --file backup.sql --remote
+
+3. **Only if the database itself is gone:**
+   - run `npx wrangler d1 create plasmatrack-bot`;
+   - put the new `database_id` in `wrangler.toml`;
+   - run `npx wrangler d1 migrations apply plasmatrack-bot --remote`;
+   - run `npx wrangler deploy`.
+4. **Load it:**
+
+       npx wrangler d1 execute plasmatrack-bot --remote --file backup.sql
+
+   It replaces those five tables' rows with the backup's. Webhooks handled since the backup
+   may be handled a second time, so expect a few repeated review-channel updates or DMs.
 
 ## Limits and retries
 

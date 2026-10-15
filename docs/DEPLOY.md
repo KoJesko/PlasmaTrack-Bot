@@ -68,6 +68,7 @@ Run these from the `packages/worker` folder (one command per line; works in Powe
     npx wrangler queues create plasmatrack-work
     npx wrangler queues create plasmatrack-work-dlq      # messages that failed every try
     npx wrangler r2 bucket create plasmatrack-render-cache
+    npx wrangler r2 bucket create plasmatrack-backups      # weekly D1 backups (OPERATIONS.md)
 
 Now edit `wrangler.toml`: paste the `database_id`, and fill in every `[vars]` value from step 1.
 Until the renderer is running, set `RENDERER_URL = "https://renderer.invalid"`. That's a

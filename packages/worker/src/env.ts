@@ -16,6 +16,8 @@ export interface Env {
   RENDERER?: DurableObjectNamespace<RendererContainer>;
   /** Private basemaps ({game}.pmtiles) the container loads when it starts. */
   TILES?: R2Bucket;
+  /** Weekly D1 backups (src/backup.ts). Without it, the weekly run only logs a warning. */
+  BACKUPS?: R2Bucket;
 
   DISCORD_APPLICATION_ID: string;
   DISCORD_PUBLIC_KEY: string;

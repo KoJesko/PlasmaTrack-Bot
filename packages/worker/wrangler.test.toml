@@ -13,6 +13,10 @@ migrations_dir = "migrations"
 binding = "RENDER_CACHE"
 bucket_name = "plasmatrack-render-cache-test"
 
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "plasmatrack-backups-test"
+
 [[queues.producers]]
 binding = "WORK_QUEUE"
 queue = "plasmatrack-work-test"

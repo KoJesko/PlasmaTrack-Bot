@@ -37,6 +37,7 @@ import {
   D1TokenGrantStore,
   R2BlobCache,
 } from './adapters.ts';
+import { backupDatabase } from './backup.ts';
 
 export { RendererContainer } from './renderer-container.ts';
 
@@ -48,6 +49,8 @@ const DEAD_LETTER_SUFFIX = '-dlq';
 /** Slash commands per user: at most this many per window (the owner's rule: 5 per 20 s). */
 const COMMAND_LIMIT = 5;
 const COMMAND_WINDOW_MS = 20_000;
+/** The weekly D1 backup (Sundays 03:47 UTC). Must match a cron in wrangler.toml's [triggers]. */
+export const BACKUP_CRON = '47 3 * * 0';
 /** Job versions are kept a week: longer than the server's 72 h retry window. */
 const JOB_VERSION_RETENTION_MS = 7 * 24 * 3600_000;
 import type { Env } from './env.ts';
@@ -250,8 +253,21 @@ export default {
     );
   },
 
-  async scheduled(_controller, env, ctx) {
+  async scheduled(controller, env, ctx) {
     const rt = runtime(env);
+    if (controller.cron === BACKUP_CRON) {
+      if (!env.BACKUPS) {
+        rt.logger.warn('backup skipped: no BACKUPS bucket bound');
+        return;
+      }
+      ctx.waitUntil(
+        backupDatabase(env.DB, env.BACKUPS, Date.now()).then(
+          ({ key, bytes, rows, deleted }) => rt.logger.info('backup written', { key, bytes, rows, deleted }),
+          (err: unknown) => rt.logger.error('backup failed', { err }),
+        ),
+      );
+      return;
+    }
     ctx.waitUntil(
       Promise.all([
         new D1DedupeStore(env.DB).purgeExpired(),
