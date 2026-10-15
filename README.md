@@ -57,6 +57,7 @@ Key behaviour:
 | 4 | Player features: `/token` (new, status, revoke), `/name`, `/profile`, `/job`, `/jobs`, `/leaderboard` | ✅ |
 | 5 | Moderator features: `/review` (queue, job view with route and speed/fuel charts, approve/reject/void/restore, trace), review-channel posts, `/recalc`, `/bonus`, `/player` (tokens collected by the player with a button, Singleplayer Division, blocking), `/config`, `/release`, `/revocation`, `/admins`, `/audit`, `/tmpflags` | ✅ |
 | 6 | Hardening and docs (retries that end in a reply, dead-letter queue, rate limit, error references, server-example contract tests, secret scan, CI, renderer Dockerfile, command/operations/data docs); manual submissions (`/submit`, `/approve-manual`, `/decline-manual`), `/post-approve`, `/post-decline`, `/edit-job`, `/stats`, `/history` | ✅ |
+| 7 | Up to 5 adjusted-scale sections per manual job with the city-scale minimum; `/graph` (player, job, leaderboard) for distance, fuel, damage and income; bar and line charts in the renderer | ✅ |
 
 ## Docs
 

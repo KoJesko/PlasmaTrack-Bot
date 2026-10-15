@@ -43,6 +43,9 @@ function setup() {
       renders.push(`chart:${req.unit}`);
       return { bytes: new Uint8Array([1]), contentType: 'image/png', cached: false };
     },
+    renderBars: async () => {
+      throw new Error('unused');
+    },
   };
 
   async function run(interaction: APIInteraction) {
@@ -98,8 +101,8 @@ describe('/review', () => {
     expect(view.response).toEqual({ type: 5, data: { flags: EPHEMERAL } });
     const [main] = view.sent!.embeds!;
     expect(main!.title).toBe('Job R3VW-5T6Y · ETS2 · In review');
-    expect(view.files.map((f) => f.name)).toEqual(['route.png', 'speed.png', 'fuel.png']);
-    expect(renders.sort()).toEqual(['chart:L', 'chart:mph', 'route']);
+    expect(view.files.map((f) => f.name)).toEqual(['route.png', 'speed.png', 'fuel.png', 'distance-game.png', 'distance-world.png', 'damage.png']);
+    expect(renders.sort()).toEqual(['chart:%', 'chart:L', 'chart:mi', 'chart:mi', 'chart:mph', 'route']);
     const labels = view.sent!.components!.flatMap((r) => r.components.map((c) => c.label));
     expect(labels).toEqual(['Approve', 'Reject', 'Void', 'Recalculate', 'Trace', 'Refresh']);
   });

@@ -37,6 +37,9 @@ function setup(opts: { connected?: boolean; renderFails?: boolean; routeStatus?:
     renderChart: async () => {
       throw new Error('unused');
     },
+    renderBars: async () => {
+      throw new Error('unused');
+    },
   };
   if (opts.truckersmp) {
     const tmp = opts.truckersmp;

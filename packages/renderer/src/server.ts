@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
+  BARS_PATH,
+  barsRenderRequestSchema,
   CHART_PATH,
   chartRenderRequestSchema,
   COMPRESS_MAX_INPUT_BYTES,
@@ -19,6 +21,7 @@ import {
   verifyTilesUploadToken,
   type Logger,
 } from '@plasmatrack/core';
+import { renderBars } from './bars.ts';
 import { renderChart } from './chart.ts';
 import { compressImage, UnsupportedImageError } from './image.ts';
 import { Limiter, QueueFullError } from './limiter.ts';
@@ -128,7 +131,7 @@ export function createRendererServer(deps: ServerDeps): Server {
       await receiveBasemap(req, res, tilesMatch[1] as 'ets2' | 'ats', deps.key, deps.basemaps, deps.logger);
       return;
     }
-    if (req.method !== 'POST' || (path !== ROUTE_PATH && path !== CHART_PATH && path !== COMPRESS_PATH)) {
+    if (req.method !== 'POST' || (path !== ROUTE_PATH && path !== CHART_PATH && path !== BARS_PATH && path !== COMPRESS_PATH)) {
       sendJson(res, 404, { error: 'not found' });
       return;
     }
@@ -174,6 +177,10 @@ export function createRendererServer(deps: ServerDeps): Server {
       const parsed = routeRenderRequestSchema.safeParse(json);
       if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
       png = (await deps.limiter.run(() => deps.routes.render(parsed.data))).png;
+    } else if (path === BARS_PATH) {
+      const parsed = barsRenderRequestSchema.safeParse(json);
+      if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+      png = await deps.limiter.run(async () => renderBars(parsed.data));
     } else {
       const parsed = chartRenderRequestSchema.safeParse(json);
       if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));

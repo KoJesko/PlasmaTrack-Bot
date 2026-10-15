@@ -10,7 +10,7 @@ import type { CommandDefinition, ComponentDefinition, ModalDefinition, TaskDefin
 import { discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, OUTCOME_LABELS, pointsText } from '../format.ts';
 import { stringOption, subcommand } from '../options.ts';
 import { evidenceImages } from '../submit.ts';
-import { fuelChart, speedChart } from './charts.ts';
+import { jobCharts } from '../charts.ts';
 import { adminFor, brief, modalValue, modFailure, privateMessage, reasonModal } from './common.ts';
 
 // /review queue | job | trace, plus the job view's buttons. Decisions go
@@ -198,10 +198,10 @@ function optional(err: unknown, deps: TaskDeps, what: string): null {
 
 async function jobView(job: AdminJobDetail, series: Series | null, route: ServerRoute | null, deps: TaskDeps) {
   const title = `Job ${formatJobId(job.job_id)}`;
-  const [map, speed, fuel] = await Promise.all([
+  const [map, charts] = await Promise.all([
     route && route.features.length > 0 ? image(deps, () => deps.renderer.renderRoute(toRouteRenderRequest(route, { title }))) : null,
-    series ? image(deps, async () => { const r = speedChart(series, title); return r ? deps.renderer.renderChart(r) : null; }) : null,
-    series ? image(deps, async () => { const r = fuelChart(series, title); return r ? deps.renderer.renderChart(r) : null; }) : null,
+    // Speed, fuel, distance (in game and 1:1) and damage over the job's time.
+    series ? jobCharts(series, title, deps) : [],
   ]);
 
   const files: OutgoingFile[] = [];
@@ -212,15 +212,11 @@ async function jobView(job: AdminJobDetail, series: Series | null, route: Server
     main.image = { url: 'attachment://route.png' };
     main.footer = { text: MAP_CREDIT_LINE };
   }
-  if (speed) {
-    files.push({ name: 'speed.png', bytes: speed, contentType: 'image/png' });
-    embeds.push({ title: 'Speed (highest in each slice)', image: { url: 'attachment://speed.png' } });
+  for (const chart of charts) {
+    files.push({ name: chart.name, bytes: chart.bytes, contentType: 'image/png' });
+    embeds.push({ title: chart.title, image: { url: `attachment://${chart.name}` } });
   }
-  if (fuel) {
-    files.push({ name: 'fuel.png', bytes: fuel, contentType: 'image/png' });
-    embeds.push({ title: 'Fuel', image: { url: 'attachment://fuel.png' } });
-  }
-  if (!map && !speed && !fuel && (route || series)) main.footer = { text: 'Maps and charts aren’t available right now.' };
+  if (!map && charts.length === 0 && (route || series)) main.footer = { text: 'Maps and charts aren’t available right now.' };
   // Images of a manual job (custom map, evidence), fetched now: the links last an hour.
   if (job.evidence.length > 0) {
     const shown = await evidenceImages(job.evidence, deps, 10 - embeds.length);
@@ -314,9 +310,11 @@ function manualFields(job: AdminJobDetail): APIEmbedField[] {
       s.distance_km !== undefined && s.distance_km !== null ? `Distance (game): ${distance(s.distance_mi, s.distance_km)}` : null,
       s.map_scale ? `Map scale: 1:${s.map_scale}${job.submission?.map_scale_defaulted ? ' (default)' : ''}` : null,
       s.uk ? `UK (1:15): ${distance(s.uk.distance_mi, s.uk.distance_km)}, ${escapeMarkdown(s.uk.entry_city ?? '?')} → ${escapeMarkdown(s.uk.end_city ?? '?')}` : null,
-      s.adjusted_scale
-        ? `Adjusted (1:${s.adjusted_scale.scale ?? '?'}): ${distance(s.adjusted_scale.distance_mi, s.adjusted_scale.distance_km)}, ${escapeMarkdown(s.adjusted_scale.entry_city ?? '?')} → ${escapeMarkdown(s.adjusted_scale.exit_city ?? '?')}`
-        : null,
+      // Numbered from 1; /approve-manual and /edit-job take these numbers.
+      ...(s.adjusted_scales ?? []).map(
+        (a, n) =>
+          `Section ${n + 1} (1:${a.scale ?? '?'}): ${distance(a.distance_mi, a.distance_km)}, ${escapeMarkdown(a.entry_city ?? '?')} → ${escapeMarkdown(a.exit_city ?? '?')}`,
+      ),
       s.fuel_used_l !== undefined && s.fuel_used_l !== null ? `Fuel: ${s.fuel_used_l} L` : null,
       s.damage_pct !== undefined && s.damage_pct !== null ? `Damage: ${s.damage_pct}%` : null,
       s.profit !== undefined && s.profit !== null ? `Profit: ${s.profit}` : null,

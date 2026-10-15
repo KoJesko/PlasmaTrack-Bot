@@ -193,7 +193,7 @@ describe('/submit flow', () => {
     expect(sent.sent!.components).toEqual([]);
     const job = [...s.server.jobs.values()].find((j) => j.origin === 'manual')!;
     expect(job.outcome).toBe('pending_review');
-    expect(job.submission).toMatchObject({ unit: 'km', uk: { distance: 76 }, adjusted_scale: { distance: 40, scale: 1 }, mod_names: ['Map A', 'Trucks B'] });
+    expect(job.submission).toMatchObject({ unit: 'km', uk: { distance: 76 }, adjusted_scales: [{ distance: 40, scale: 1 }], mod_names: ['Map A', 'Trucks B'] });
     expect(job.evidence!.map((e) => e.role).sort()).toEqual(['adjusted_scale', 'custom_map', 'main', 'uk_route']);
     expect(s.drafts.drafts.size).toBe(0);
 
@@ -239,6 +239,101 @@ describe('/submit flow', () => {
     (s.clock as FakeClock).t += DRAFT_TTL_MS + 1;
     const late = await s.run(buttonInteraction(buttons(again.sent)[0]!, { user: PLAYER_ID, id: id() }));
     expect(late.sent!.content).toContain('expired');
+  });
+});
+
+describe('adjusted-scale sections (up to 5; city sections from 3 mi in game)', () => {
+  let n = 0;
+  /** /submit adjusted-scale with one section. */
+  function addSection(s: ReturnType<typeof setup>, city: string, distance: number, scale: number) {
+    const file = s.attach(`section-${n++}.png`);
+    return s.run(
+      commandInteraction('submit', {
+        user: PLAYER_ID,
+        id: id(),
+        options: [sub('adjusted-scale', [opt('entry_city', city), opt('exit_city', city), opt('distance', distance, 10), opt('scale', scale, 10), opt('evidence', 'x1', 11)])],
+        attachments: { x1: file },
+      }),
+    );
+  }
+  const sectionFields = (m: Sent | undefined) => m!.embeds![0]!.fields!.filter((f) => f.name.startsWith('Adjusted-scale section')).map((f) => `${f.name}: ${f.value}`);
+
+  it('adds up to five, refuses short city sections and too much distance, removes by button, and sends them all', async () => {
+    const s = setup();
+    await s.run(submitJob(s)); // 380 km
+
+    // Under 3 is too short in any unit: refused before anything runs.
+    const tiny = await addSection(s, 'Paris', 2, 3);
+    expect(tiny.response.data!.content).toContain('3 mi (4.83 km) in game');
+    // 4 km is under 3 mi (4.83 km): refused against the draft's unit, before uploading.
+    const uploads = s.server.evidence.size;
+    const short = await addSection(s, 'Paris', 4, 3);
+    expect(short.sent!.content).toContain('3 mi (4.83 km) in game');
+    expect(s.server.evidence.size).toBe(uploads);
+    // Too long together with the job's distance.
+    const long = await addSection(s, 'Somewhere', 381, 1);
+    expect(long.sent!.content).toContain('can’t be longer');
+
+    const city = await addSection(s, 'Paris', 6, 3);
+    expect(city.sent!.content).toContain('Added adjusted-scale section 1 of up to 5');
+    expect(sectionFields(city.sent)).toEqual(['Adjusted-scale section 1 (1:3): 3.73 mi (6 km): Paris → Paris']);
+    let last = city;
+    for (const town of ['Lyon', 'Lille', 'Metz', 'Nice']) last = await addSection(s, town, 10, 1);
+    expect(sectionFields(last.sent)).toHaveLength(5);
+    expect(buttons(last.sent).filter((b) => b.startsWith('msub:rm:'))).toHaveLength(5);
+    const sixth = await addSection(s, 'Brest', 10, 1);
+    expect(sixth.sent!.content).toContain('at most 5 adjusted-scale sections');
+
+    // Remove the first section: the rest move up and the preview gets a new revision.
+    const removeFirst = buttons(last.sent).find((b) => b.endsWith(':0'))!;
+    const removed = await s.run(buttonInteraction(removeFirst, { user: PLAYER_ID, id: id() }));
+    expect(removed.sent!.content).toContain('Removed adjusted-scale section 1');
+    expect(sectionFields(removed.sent)[0]).toBe('Adjusted-scale section 1 (1:1): 6.21 mi (10 km): Lyon → Lyon');
+    expect(sectionFields(removed.sent)).toHaveLength(4);
+    // The old preview's buttons are out of date now.
+    const stale = await s.run(buttonInteraction(removeFirst, { user: PLAYER_ID, id: id() }));
+    expect(stale.sent!.content).toContain('out of date');
+
+    await s.run(buttonInteraction(buttons(removed.sent)[0]!, { user: PLAYER_ID, id: id() }));
+    const job = [...s.server.jobs.values()].find((j) => j.origin === 'manual')!;
+    expect((job.submission!['adjusted_scales'] as { entry_city: string }[]).map((x) => x.entry_city)).toEqual(['Lyon', 'Lille', 'Metz', 'Nice']);
+    expect(job.evidence!.filter((e) => e.role === 'adjusted_scale').map((e) => e.section)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('moderators see numbered sections and edit or remove one by its number', async () => {
+    const s = setup();
+    const { sent } = await s.run(submitJob(s));
+    await addSection(s, 'Paris', 6, 3);
+    const two = await addSection(s, 'Lyon', 10, 1);
+    await s.run(buttonInteraction(buttons(two.sent)[0]!, { user: PLAYER_ID, id: id() }));
+    expect(sent).toBeDefined();
+    const jobId = [...s.server.jobs.values()].find((j) => j.origin === 'manual')!.job_id;
+
+    const review = await s.run(commandInteraction('review', { ...mod(), options: [sub('job', [opt('id', jobId)])] }));
+    const sheet = review.sent!.embeds![0]!.fields!.find((f) => f.name.startsWith('Submitted by hand'))!.value;
+    expect(sheet).toContain('Section 1 (1:3): 3.73 mi (6 km), Paris → Paris');
+    expect(sheet).toContain('Section 2 (1:1): 6.21 mi (10 km), Lyon → Lyon');
+    expect(review.sent!.embeds!.map((e) => e.title)).toEqual(
+      expect.arrayContaining(['Adjusted-scale evidence, section 1 as submitted', 'Adjusted-scale evidence, section 2 as submitted']),
+    );
+
+    const edit = (sub_: string, options: unknown[]) => s.run(commandInteraction('edit-job', { ...mod(), options: [sub(sub_, [opt('job', jobId), opt('reason', 'Checked the screenshot'), ...options])] }));
+    const noSection = await edit('stats', [opt('unit', 'km'), opt('adjusted_distance', 12, 10)]);
+    expect(noSection.response.data!.content).toContain('Give `section`');
+    const tooShort = await edit('stats', [opt('unit', 'km'), opt('section', 1, 4), opt('adjusted_distance', 2, 10), opt('adjusted_scale', 3, 10)]);
+    expect(tooShort.response.data!.content).toContain('3 mi (4.83 km) in game');
+
+    const changed = await edit('stats', [opt('unit', 'km'), opt('section', 2, 4), opt('adjusted_distance', 12, 10)]);
+    expect(changed.sent!.content).toContain('adjusted-scale section 2: distance 7.46 mi (12 km)');
+    const renamed = await edit('details', [opt('section', 2, 4), opt('adjusted_entry_city', 'Dijon')]);
+    expect(renamed.sent!.content).toContain('adjusted-scale section 2: entry city Dijon');
+
+    const cleared = await edit('clear', [opt('fields', 'section1')]);
+    expect(cleared.sent!.content).toContain('adjusted-scale section 1: removed');
+    const after = await s.run(commandInteraction('review', { ...mod(), options: [sub('job', [opt('id', jobId)])] }));
+    const left = after.sent!.embeds![0]!.fields!.find((f) => f.name.startsWith('Submitted by hand'))!.value;
+    expect(left).toContain('Section 1 (1:1): 7.46 mi (12 km), Dijon → Lyon');
+    expect(left).not.toContain('Section 2');
   });
 });
 

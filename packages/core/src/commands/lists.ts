@@ -91,8 +91,8 @@ export const jobsTask: TaskDefinition = {
 
 const PERIOD_CODE: Record<LeaderboardPeriod, string> = { all: 'a', month: 'm', week: 'w' };
 const CODE_PERIOD: Record<string, LeaderboardPeriod> = { a: 'all', m: 'month', w: 'week' };
-const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
-const WEEK = /^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/;
+export const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+export const WEEK = /^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/;
 
 interface LeaderboardInput {
   game: Game;

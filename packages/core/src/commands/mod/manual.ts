@@ -5,8 +5,8 @@ import type { Decision } from '../../api/schemas.ts';
 import { ApplicationCommandOptionType } from '../../discord/constants.ts';
 import { UserFacingError, type CommandDefinition, type HandlerResult, type TaskDefinition } from '../../interactions/types.ts';
 import { OUTCOME_LABELS, pointsText } from '../format.ts';
-import { describeChanges, readStatChanges, splitMods, STAT_OPTIONS, textOption } from '../manual-fields.ts';
-import { booleanOption, stringOption, subcommand } from '../options.ts';
+import { describeChanges, MAX_ADJUSTED_SECTIONS, readStatChanges, sectionOption, splitMods, STAT_OPTIONS, textOption } from '../manual-fields.ts';
+import { booleanOption, numberOption, stringOption, subcommand } from '../options.ts';
 import { adminFor, brief, modFailure, privateMessage, REASON_OPTION } from './common.ts';
 
 // Manual jobs and corrections (owner, 2026-10-15). Replies are private.
@@ -137,9 +137,12 @@ const CLEARABLE: Record<string, keyof JobEdit> = {
   mod_names: 'mod_names',
   map_scale: 'map_scale',
   uk: 'uk',
-  adjusted_scale: 'adjusted_scale',
+  adjusted_scales: 'adjusted_scales',
   bonus: 'bonus_id',
 };
+/** `section2` in /edit-job clear removes adjusted-scale section 2. */
+const CLEAR_SECTION = /^section(\d)$/;
+const CLEAR_HELP = `${Object.keys(CLEARABLE).join(', ')}, or section1 to section${MAX_ADJUSTED_SECTIONS} for one adjusted-scale section`;
 
 export const editJobCommand: CommandDefinition = {
   access: 'moderator',
@@ -170,7 +173,8 @@ export const editJobCommand: CommandDefinition = {
           textOption('mod_names', 'Mods, separated by commas (replaces the list)', false, 1000),
           textOption('uk_entry_city', 'City where the UK stretch starts', false),
           textOption('uk_end_city', 'City where the UK stretch ends', false),
-          textOption('adjusted_entry_city', 'City where the adjusted-scale section starts', false),
+          sectionOption('Adjusted-scale section whose cities to correct, as /review numbers it'),
+          textOption('adjusted_entry_city', 'City where that adjusted-scale section starts', false),
           textOption('adjusted_exit_city', 'City where it ends', false),
         ],
       },
@@ -181,7 +185,7 @@ export const editJobCommand: CommandDefinition = {
         options: [
           JOB_ID_OPTION,
           REASON_OPTION,
-          textOption('fields', `Comma-separated: ${Object.keys(CLEARABLE).join(', ')}`.slice(0, 100), true, 200),
+          textOption('fields', `Comma-separated: ${CLEAR_HELP}`.slice(0, 100), true, 200),
         ],
       },
     ],
@@ -221,12 +225,21 @@ export const editJobCommand: CommandDefinition = {
       if (ukEntry || ukEnd) changes.uk = { ...(ukEntry ? { entry_city: ukEntry } : {}), ...(ukEnd ? { end_city: ukEnd } : {}) };
       const adjEntry = text('adjusted_entry_city');
       const adjExit = text('adjusted_exit_city');
-      if (adjEntry || adjExit) changes.adjusted_scale = { ...(adjEntry ? { entry_city: adjEntry } : {}), ...(adjExit ? { exit_city: adjExit } : {}) };
+      const section = numberOption(interaction, 'section');
+      if (adjEntry || adjExit) {
+        if (section === undefined) problems.push('Give `section` (the number /review shows) with the adjusted-scale cities.');
+        else changes.adjusted_scales = { [String(section - 1)]: { ...(adjEntry ? { entry_city: adjEntry } : {}), ...(adjExit ? { exit_city: adjExit } : {}) } };
+      } else if (section !== undefined) problems.push('`section` goes with `adjusted_entry_city` or `adjusted_exit_city`.');
     } else if (sub === 'clear') {
       for (const name of (stringOption(interaction, 'fields') ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) {
         const field = CLEARABLE[name];
+        const section = CLEAR_SECTION.exec(name);
         if (field) (changes as Record<string, null>)[field] = null;
-        else problems.push(`\`${name}\` can’t be cleared. These can: ${Object.keys(CLEARABLE).join(', ')}.`);
+        else if (section && Number(section[1]) >= 1 && Number(section[1]) <= MAX_ADJUSTED_SECTIONS) {
+          // Numbers refer to the list before this edit, so several can be removed at once.
+          // Clearing them all (adjusted_scales) wins over single ones.
+          if (changes.adjusted_scales !== null) changes.adjusted_scales = { ...changes.adjusted_scales, [String(Number(section[1]) - 1)]: null };
+        } else problems.push(`\`${name}\` can’t be cleared. These can: ${CLEAR_HELP}.`);
       }
     }
     if (problems.length === 0 && Object.keys(changes).filter((k) => k !== 'unit' && k !== 'fuel_unit').length === 0) problems.push('Give at least one field to change.');

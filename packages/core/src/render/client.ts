@@ -4,6 +4,8 @@ import { sniffImageType } from '../media.ts';
 import type { BlobCache, CachedBlob, Clock } from '../ports.ts';
 import { systemClock } from '../ports.ts';
 import {
+  BARS_PATH,
+  barsRenderRequestSchema,
   CHART_PATH,
   chartRenderRequestSchema,
   COMPRESS_PATH,
@@ -11,6 +13,7 @@ import {
   ROUTE_PATH,
   routeRenderRequestSchema,
   signRendererRequest,
+  type BarsRenderRequest,
   type ChartRenderRequest,
   type RouteRenderRequest,
 } from './protocol.ts';
@@ -23,6 +26,7 @@ export interface RenderedImage extends CachedBlob {
 export interface ImageRenderer {
   renderRoute(request: RouteRenderRequest): Promise<RenderedImage>;
   renderChart(request: ChartRenderRequest): Promise<RenderedImage>;
+  renderBars(request: BarsRenderRequest): Promise<RenderedImage>;
 }
 
 /** Shrinks evidence images before they are uploaded (the renderer does it with sharp). */
@@ -69,6 +73,10 @@ export class RendererClient implements ImageRenderer, ImageCompressor {
 
   renderChart(request: ChartRenderRequest): Promise<RenderedImage> {
     return this.render(CHART_PATH, 'chart', chartRenderRequestSchema.parse(request));
+  }
+
+  renderBars(request: BarsRenderRequest): Promise<RenderedImage> {
+    return this.render(BARS_PATH, 'bars', barsRenderRequestSchema.parse(request));
   }
 
   async compressImage(bytes: Uint8Array<ArrayBuffer>, contentType: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: 'image/avif' }> {

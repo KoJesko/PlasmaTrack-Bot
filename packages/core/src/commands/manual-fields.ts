@@ -1,5 +1,6 @@
 import type {
   APIApplicationCommandAttachmentOption,
+  APIApplicationCommandIntegerOption,
   APIApplicationCommandNumberOption,
   APIApplicationCommandStringOption,
   APIChatInputApplicationCommandInteraction,
@@ -26,11 +27,29 @@ export const MAX_EVIDENCE_BYTES = 5 * 1024 * 1024;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** Sections at another map scale per job (owner, 2026-10-15; PUBLIC_API §6). */
+export const MAX_ADJUSTED_SECTIONS = 5;
+/** City streets are scale 3 in both games. */
+export const CITY_SCALE = 3;
+/** A city-scale section counts only from 1 mi of real distance: 3 mi in game. */
+const CITY_MIN_GAME: Record<DistanceUnit, number> = { mi: 3, km: 3 * KM_PER_MI };
+export const CITY_RULE = 'A city-scale (1:3) section counts only from 3 mi (4.83 km) in game, which is 1 mi of real distance.';
+
+/** The owner's rule, which the server enforces too: shorter city sections are refused. */
+export function citySectionTooShort(distance: number, scale: number, unit: DistanceUnit): boolean {
+  return scale === CITY_SCALE && distance < CITY_MIN_GAME[unit];
+}
+
 // ---------------------------------------------------------------------------
 // Option builders
 
 export function textOption(name: string, description: string, required: boolean, maxLength = 100): APIApplicationCommandStringOption {
   return { type: ApplicationCommandOptionType.String, name, description, required, min_length: 1, max_length: maxLength };
+}
+
+/** Which adjusted-scale section, numbered from 1 as /review shows them. */
+export function sectionOption(description = 'Adjusted-scale section number, as /review shows it (1–5)'): APIApplicationCommandIntegerOption {
+  return { type: ApplicationCommandOptionType.Integer, name: 'section', description, required: false, min_value: 1, max_value: MAX_ADJUSTED_SECTIONS };
 }
 
 export function numOption(name: string, description: string, required: boolean, min?: number, max?: number): APIApplicationCommandNumberOption {
@@ -144,8 +163,9 @@ export const STAT_OPTIONS = [
   numOption('distance', 'Distance the game logged', false, 0.01, 100_000),
   numOption('map_scale', 'Map scale', false, 0.01, 1000),
   numOption('uk_distance', 'ETS2: distance driven in the UK', false, 0.01, 100_000),
-  numOption('adjusted_distance', 'Distance of the adjusted-scale section', false, 0.01, 100_000),
-  numOption('adjusted_scale', 'Scale of the adjusted-scale section', false, 0.01, 1000),
+  sectionOption('Adjusted-scale section to correct, as /review numbers it (1–5)'),
+  numOption('adjusted_distance', 'Distance of that adjusted-scale section', false, 0.01, 100_000),
+  numOption('adjusted_scale', 'Scale of that adjusted-scale section', false, 0.01, 1000),
   numOption('fuel_used', 'Fuel used', false, 0, 100_000),
   numOption('damage', 'Cargo damage, percent (0–100)', false, 0, 100),
   numOption('profit', 'Profit, in the game’s currency', false, -1_000_000_000, 1_000_000_000),
@@ -167,11 +187,17 @@ export function readStatChanges(i: APIChatInputApplicationCommandInteraction): {
 
   if (d !== undefined) changes.distance = d;
   if (ukD !== undefined) changes.uk = { distance: ukD };
-  if (adjD !== undefined || adjS !== undefined) changes.adjusted_scale = { ...(adjD !== undefined ? { distance: adjD } : {}), ...(adjS !== undefined ? { scale: adjS } : {}) };
+  const section = numberOption(i, 'section');
+  if (adjD !== undefined || adjS !== undefined) {
+    if (section === undefined) problems.push('Give `section` (the number /review shows) with `adjusted_distance` or `adjusted_scale`.');
+    else changes.adjusted_scales = { [String(section - 1)]: { ...(adjD !== undefined ? { distance: adjD } : {}), ...(adjS !== undefined ? { scale: adjS } : {}) } };
+  } else if (section !== undefined) problems.push('`section` goes with `adjusted_distance` or `adjusted_scale`.');
   if (d !== undefined || ukD !== undefined || adjD !== undefined) {
     if (isDistanceUnit(unit)) changes.unit = unit;
     else problems.push('Give `unit` with any distance.');
   }
+  // When both are given here, the city rule can be checked now (the server checks always).
+  if (adjD !== undefined && adjS !== undefined && isDistanceUnit(unit) && citySectionTooShort(adjD, adjS, unit)) problems.push(CITY_RULE);
   if (fuel !== undefined) {
     changes.fuel_used = fuel;
     if (isFuelUnit(fuelUnit)) changes.fuel_unit = fuelUnit;
@@ -199,6 +225,12 @@ export function readStatChanges(i: APIChatInputApplicationCommandInteraction): {
   return { changes, problems };
 }
 
+function sectionParts(v: Record<string, unknown>, dist: (n: number) => string): string {
+  return Object.entries(v)
+    .map(([k, x]) => `${k.replace(/_/g, ' ')} ${k === 'distance' ? dist(x as number) : k === 'scale' ? `1:${String(x)}` : String(x)}`)
+    .join(', ');
+}
+
 /** One line per corrected field, for the moderator's confirmation. */
 export function describeChanges(changes: JobEdit): string[] {
   const unit = changes.unit;
@@ -210,9 +242,11 @@ export function describeChanges(changes: JobEdit): string[] {
     if (v === null) lines.push(`${name(k)}: cleared`);
     else if (k === 'distance') lines.push(`distance: ${dist(v as number)}`);
     else if (k === 'fuel_used') lines.push(`fuel used: ${changes.fuel_unit ? typedFuel(v as number, changes.fuel_unit) : v}`);
-    else if (k === 'uk' || k === 'adjusted_scale') {
-      const parts = Object.entries(v as Record<string, unknown>).map(([kk, vv]) => `${name(kk)} ${kk === 'distance' ? dist(vv as number) : String(vv)}`);
-      lines.push(`${k === 'uk' ? 'UK' : 'adjusted scale'}: ${parts.join(', ')}`);
+    else if (k === 'uk') lines.push(`UK: ${sectionParts(v as Record<string, unknown>, dist)}`);
+    else if (k === 'adjusted_scales') {
+      for (const [n, section] of Object.entries(v as Record<string, Record<string, unknown> | null>)) {
+        lines.push(`adjusted-scale section ${Number(n) + 1}: ${section === null ? 'removed' : sectionParts(section, dist)}`);
+      }
     } else if (Array.isArray(v)) lines.push(`${name(k)}: ${v.join(', ')}`);
     else lines.push(`${name(k)}: ${String(v)}`);
   }

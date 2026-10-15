@@ -12,12 +12,15 @@ import type { ManualDraft } from '../ports.ts';
 import { ImageRejectedError } from '../render/client.ts';
 import { discordTime, escapeMarkdown, GAME_SHORT, isGame } from './format.ts';
 import {
+  citySectionTooShort,
+  CITY_RULE,
   DATE_EXAMPLE,
   fuelUnitOption,
   IMAGE_TYPES,
   imageOption,
   isDistanceUnit,
   isFuelUnit,
+  MAX_ADJUSTED_SECTIONS,
   MAX_ATTACHMENT_BYTES,
   MAX_EVIDENCE_BYTES,
   money,
@@ -36,12 +39,14 @@ import { attachmentOption, GAME_OPTION, numberOption, stringOption, subcommand }
 // `/submit job` checks the typed values, then (from the queue) downloads the
 // attached images, has the renderer shrink them to AVIF, uploads them to the
 // server and keeps a draft. The player sees a private preview with Send and
-// Cancel. `/submit adjusted-scale` adds that section to the draft (Discord
-// allows 25 options per command, and the whole form needs 29). Nothing reaches
-// the server's job list until Send. Every reply is private.
+// Cancel. Each `/submit adjusted-scale` adds one section at another map scale,
+// up to 5 (Discord allows 25 options per command, and /submit job uses 24);
+// the preview has a Remove button per section. Nothing reaches the server's
+// job list until Send. Every reply is private.
 
 export const SUBMIT_PREPARE_TASK = 'submit.prepare';
 export const SUBMIT_ADJUSTED_TASK = 'submit.adjusted';
+export const SUBMIT_REMOVE_SECTION_TASK = 'submit.remove-section';
 export const SUBMIT_SEND_TASK = 'submit.send';
 export const SUBMIT_CANCEL_TASK = 'submit.cancel';
 export const JOB_EVIDENCE_TASK = 'job.evidence';
@@ -70,7 +75,7 @@ interface AttachmentRef {
 }
 
 /** The typed fields; images are added once uploaded. */
-type TypedJob = Omit<ManualJobInput, 'evidence' | 'custom_map' | 'uk' | 'adjusted_scale'> & {
+type TypedJob = Omit<ManualJobInput, 'evidence' | 'custom_map' | 'uk' | 'adjusted_scales'> & {
   uk?: { distance: number; entry_city: string; end_city: string };
 };
 
@@ -156,6 +161,8 @@ export const submitCommand: CommandDefinition = {
       if (!section.entry_city || !section.exit_city) problems.push('Give both cities.');
       if (!(section.distance > 0)) problems.push('`distance` must be more than 0.');
       if (!(section.scale > 0)) problems.push('`scale` must be more than 0.');
+      // Under 3 is too short in either unit; the exact minimum is checked against the draft's unit.
+      else if (citySectionTooShort(section.distance, section.scale, 'mi')) problems.push(CITY_RULE);
       if (problems.length > 0 || !attachment) return problemsReply(problems);
       const input: AdjustedInput = { section, attachment };
       return { kind: 'defer', ephemeral: true, task: { name: SUBMIT_ADJUSTED_TASK, input } };
@@ -288,7 +295,7 @@ export const submitPrepareTask: TaskDefinition = {
     return preview(
       draft,
       uploaded,
-      'Check everything, then press **Send**. Driven part of the trip at another map scale? Add it first with `/submit adjusted-scale`.',
+      `Check everything, then press **Send**. Drove parts of the trip at another map scale? Add each one first with \`/submit adjusted-scale\` (up to ${MAX_ADJUSTED_SECTIONS}).`,
     );
   },
 };
@@ -298,21 +305,72 @@ export const submitAdjustedTask: TaskDefinition = {
   async run(input, { interaction, deps }) {
     const { section, attachment } = input as AdjustedInput;
     const api = requireApi(deps);
-    const draft = await deps.drafts.get(deps.backend!, interaction.userId);
+    const draft = normalizeDraft(await deps.drafts.get(deps.backend!, interaction.userId));
     if (!draft) throw new UserFacingError('You have no submission in progress. Start with `/submit job`, then add the adjusted-scale section.');
-    if (section.distance + (draft.job.uk?.distance ?? 0) > draft.job.distance) {
+    const sections = draft.job.adjusted_scales ?? [];
+    if (sections.length >= MAX_ADJUSTED_SECTIONS) {
+      throw new UserFacingError(`A submission can have at most ${MAX_ADJUSTED_SECTIONS} adjusted-scale sections. Remove one in the preview first.`);
+    }
+    if (citySectionTooShort(section.distance, section.scale, draft.job.unit)) throw new UserFacingError(CITY_RULE);
+    const parts = section.distance + sections.reduce((sum, s) => sum + s.distance, 0) + (draft.job.uk?.distance ?? 0);
+    if (parts > draft.job.distance) {
       throw new UserFacingError(
-        `The adjusted-scale distance${draft.job.uk ? ' and the UK distance together are' : ' is'} part of the job’s ${typedDistance(draft.job.distance, draft.job.unit)}, so ${draft.job.uk ? 'they' : 'it'} can’t be larger.`,
+        `The adjusted-scale sections${draft.job.uk ? ' and the UK stretch' : ''} are part of the job’s ${typedDistance(draft.job.distance, draft.job.unit)}, so together they can’t be longer (with this one: ${typedDistance(parts, draft.job.unit)}).`,
       );
     }
     const up = await uploadImage(attachment, api, interaction, deps);
-    draft.job.adjusted_scale = { ...section, evidence: up.evidenceId };
+    draft.job.adjusted_scales = [...sections, { ...section, evidence: up.evidenceId }];
     draft.rev++;
     draft.expiresAt = deps.clock.now() + DRAFT_TTL_MS;
     await deps.drafts.put(draft);
-    return preview(draft, [up], 'Added the adjusted-scale section. The images from before are still part of your submission. Press **Send** when everything is right.');
+    const n = draft.job.adjusted_scales.length;
+    return preview(
+      draft,
+      [up],
+      `Added adjusted-scale section ${n} of up to ${MAX_ADJUSTED_SECTIONS}. The images from before are still part of your submission. Press **Send** when everything is right.`,
+    );
   },
 };
+
+interface RemoveSectionInput {
+  id: string;
+  rev: number;
+  /** From 0. */
+  index: number;
+}
+
+export const submitRemoveSectionTask: TaskDefinition = {
+  name: SUBMIT_REMOVE_SECTION_TASK,
+  async run(input, { interaction, deps }) {
+    const { id, rev, index } = input as RemoveSectionInput;
+    const draft = normalizeDraft(await deps.drafts.get(deps.backend!, interaction.userId));
+    if (!draft || draft.id !== id) {
+      return { message: { content: 'This submission was already sent, cancelled or has expired. Start again with `/submit job`.', components: [], embeds: [] } };
+    }
+    if (draft.rev !== rev) return { message: { content: 'This preview is out of date: the submission changed since. Use the newest preview.', components: [] } };
+    const sections = draft.job.adjusted_scales ?? [];
+    if (index < 0 || index >= sections.length) return { message: { content: 'That section is already gone. Use the newest preview.', components: [] } };
+    // Its image stays uploaded but unused; the server deletes it after 24 hours.
+    sections.splice(index, 1);
+    if (sections.length > 0) draft.job.adjusted_scales = sections;
+    else delete draft.job.adjusted_scales;
+    draft.rev++;
+    draft.expiresAt = deps.clock.now() + DRAFT_TTL_MS;
+    await deps.drafts.put(draft);
+    return preview(draft, [], `Removed adjusted-scale section ${index + 1}; the ones after it moved up. Your images are still part of the submission.`);
+  },
+};
+
+/** Drafts saved before sections became a list (an hour at most) hold one `adjusted_scale`. */
+function normalizeDraft(draft: ManualDraft | null): ManualDraft | null {
+  if (!draft) return null;
+  const legacy = (draft.job as { adjusted_scale?: NonNullable<ManualJobInput['adjusted_scales']>[number] }).adjusted_scale;
+  if (legacy) {
+    draft.job.adjusted_scales = [...(draft.job.adjusted_scales ?? []), legacy];
+    delete (draft.job as { adjusted_scale?: unknown }).adjusted_scale;
+  }
+  return draft;
+}
 
 interface SendInput {
   id: string;
@@ -324,7 +382,7 @@ export const submitSendTask: TaskDefinition = {
   async run(input, { interaction, deps }) {
     const { id, rev } = input as SendInput;
     const api = requireApi(deps);
-    const draft = await deps.drafts.get(deps.backend!, interaction.userId);
+    const draft = normalizeDraft(await deps.drafts.get(deps.backend!, interaction.userId));
     if (!draft || draft.id !== id) {
       return { message: { content: 'This submission was already sent, cancelled or has expired. Start again with `/submit job`.', components: [] } };
     }
@@ -356,14 +414,18 @@ export const submitCancelTask: TaskDefinition = {
   },
 };
 
-// custom_id: "msub:send:{draft id}:{rev}" or "msub:cancel:{draft id}"
+// custom_id: "msub:send:{draft id}:{rev}", "msub:cancel:{draft id}" or
+// "msub:rm:{draft id}:{rev}:{section index from 0}"
 export const submitComponent: ComponentDefinition = {
   prefix: 'msub',
   access: 'member',
   handle: (_ctx, arg) => {
-    const [action, id, rev] = arg.split(':');
+    const [action, id, rev, index] = arg.split(':');
     if (!id || !/^[0-9a-f-]{36}$/.test(id)) return { kind: 'update', message: { content: 'This preview has expired. Start again with `/submit job`.', components: [] } };
     if (action === 'send' && rev && /^\d{1,4}$/.test(rev)) return { kind: 'defer-update', task: { name: SUBMIT_SEND_TASK, input: { id, rev: Number(rev) } satisfies SendInput } };
+    if (action === 'rm' && rev && /^\d{1,4}$/.test(rev) && index && /^\d$/.test(index)) {
+      return { kind: 'defer-update', task: { name: SUBMIT_REMOVE_SECTION_TASK, input: { id, rev: Number(rev), index: Number(index) } satisfies RemoveSectionInput } };
+    }
     if (action === 'cancel') return { kind: 'defer-update', task: { name: SUBMIT_CANCEL_TASK, input: { id } } };
     return { kind: 'update', message: { content: 'This preview has expired. Start again with `/submit job`.', components: [] } };
   },
@@ -409,6 +471,15 @@ export const jobEvidenceTask: TaskDefinition = {
 };
 
 /**
+ * A section's image is numbered as submitted. After a moderator removes a section the
+ * sheet renumbers, but the images keep their submitted numbers, so say "as submitted".
+ */
+function imageLabel(item: Pick<EvidenceItem, 'role' | 'section'>): string {
+  const base = IMAGE_LABELS[item.role] ?? IMAGE_LABELS['other']!;
+  return item.role === 'adjusted_scale' && typeof item.section === 'number' ? `${base}, section ${item.section + 1} as submitted` : base;
+}
+
+/**
  * Downloads the server's signed image links (valid for an hour, so fetched
  * now) and lays them out as embeds. Shared with the moderator job view.
  */
@@ -435,8 +506,9 @@ export async function evidenceImages(
       }
       total += got.bytes.length;
       const name = `${item.role}-${n + 1}.${type.split('/')[1]}`;
-      files.push({ name, bytes: got.bytes, contentType: type, description: IMAGE_LABELS[item.role] });
-      embeds.push({ title: IMAGE_LABELS[item.role], image: { url: `attachment://${name}` } });
+      const label = imageLabel(item);
+      files.push({ name, bytes: got.bytes, contentType: type, description: label });
+      embeds.push({ title: label, image: { url: `attachment://${name}` } });
     } catch (err) {
       deps.logger.warn('evidence image unavailable', { err, evidenceId: item.evidence_id });
       missing++;
@@ -515,11 +587,20 @@ function preview(draft: ManualDraft, images: Uploaded[], note: string): TaskOutp
     { type: ComponentType.Button, style: ButtonStyle.Success, label: 'Send', custom_id: `msub:send:${draft.id}:${draft.rev}` },
     { type: ComponentType.Button, style: ButtonStyle.Secondary, label: 'Cancel', custom_id: `msub:cancel:${draft.id}` },
   ];
+  const removeButtons: APIButtonComponent[] = (draft.job.adjusted_scales ?? []).map((_, n) => ({
+    type: ComponentType.Button,
+    style: ButtonStyle.Danger,
+    label: `Remove section ${n + 1}`,
+    custom_id: `msub:rm:${draft.id}:${draft.rev}:${n}`,
+  }));
   return {
     message: {
       content: `${note}${skipped > 0 ? `\n(${skipped} image(s) are too large to show here, but were uploaded.)` : ''}\nThis preview expires ${discordTime(new Date(draft.expiresAt).toISOString(), 'R')}.`,
       embeds,
-      components: [{ type: ComponentType.ActionRow, components: buttons }],
+      components: [
+        { type: ComponentType.ActionRow, components: buttons },
+        ...(removeButtons.length > 0 ? [{ type: ComponentType.ActionRow, components: removeButtons }] : []),
+      ],
       flags: MessageFlags.Ephemeral,
     },
     files,
@@ -542,9 +623,8 @@ export function summaryEmbed(job: ManualJobInput): APIEmbed {
   if (job.uk) {
     fields.push({ name: 'UK stretch (scale 1:15)', value: `${typedDistance(job.uk.distance, job.unit)}: ${e(job.uk.entry_city)} → ${e(job.uk.end_city)}` });
   }
-  if (job.adjusted_scale) {
-    const a = job.adjusted_scale;
-    fields.push({ name: `Adjusted scale (1:${a.scale})`, value: `${typedDistance(a.distance, job.unit)}: ${e(a.entry_city)} → ${e(a.exit_city)}` });
+  for (const [n, a] of (job.adjusted_scales ?? []).entries()) {
+    fields.push({ name: `Adjusted-scale section ${n + 1} (1:${a.scale})`, value: `${typedDistance(a.distance, job.unit)}: ${e(a.entry_city)} → ${e(a.exit_city)}` });
   }
   if (job.mod_names && job.mod_names.length > 0) fields.push({ name: 'Mods', value: job.mod_names.map(e).join(', ').slice(0, 1024) });
   return {

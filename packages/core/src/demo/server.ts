@@ -42,10 +42,14 @@ interface Job {
   world_km: number;
   game_km: number;
   delivered_at: string;
+  /** Tracked jobs' fuel (L), cargo damage (%) and income (server 69fcfe9); null when unknown. */
+  fuel_l?: number | null;
+  damage_pct?: number | null;
+  income?: number | null;
   /** Manual jobs (PUBLIC_API §6): the submitted body, its images and moderator edits. */
   origin?: 'tracked' | 'manual';
   submission?: Json;
-  evidence?: { id: string; role: string }[];
+  evidence?: { id: string; role: string; section?: number }[];
   hide_map?: boolean;
   overrides?: Json;
 }
@@ -62,9 +66,22 @@ const MAX_EVIDENCE_BYTES = 5 * 1024 * 1024;
 /** PATCH /admin/jobs fields (ADMIN_API §14). */
 const EDIT_FIELDS = new Set([
   'unit', 'fuel_unit', 'start_city', 'start_company', 'end_city', 'end_company', 'cargo_name', 'distance', 'fuel_used', 'damage',
-  'profit', 'started_at', 'ended_at', 'truck', 'truck_model', 'mod_names', 'map_scale', 'uk', 'adjusted_scale', 'bonus_id',
+  'profit', 'started_at', 'ended_at', 'truck', 'truck_model', 'mod_names', 'map_scale', 'uk', 'adjusted_scales', 'bonus_id',
 ]);
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const MAX_SECTIONS = 5;
+const CITY_RULE_TEXT = 'a city-scale section counts only from 3 mi in game (1 mi real)';
+
+/** PUBLIC_API §6: each section complete, at most 5, and the city-scale minimum. */
+function checkSections(list: Json[], unit: unknown, fields: Record<string, string>, needEvidence: boolean) {
+  if (list.length > MAX_SECTIONS) fields['adjusted_scales'] = 'at most 5 sections';
+  list.forEach((s, i) => {
+    for (const k of ['entry_city', 'exit_city', ...(needEvidence ? ['evidence'] : [])]) if (typeof s[k] !== 'string' || !s[k]) fields[`adjusted_scales[${i}].${k}`] = 'required';
+    for (const k of ['distance', 'scale']) if (typeof s[k] !== 'number' || !((s[k] as number) > 0)) fields[`adjusted_scales[${i}].${k}`] = 'a number above 0';
+    const minimum = unit === 'mi' ? 3 : 3 * KM_PER_MI;
+    if (s['scale'] === 3 && typeof s['distance'] === 'number' && s['distance'] < minimum) fields[`adjusted_scales[${i}].distance`] = CITY_RULE_TEXT;
+  });
+}
 
 interface Stored {
   bodyKey: string;
@@ -116,7 +133,7 @@ export class MockPlasmaTrackServer {
     this.addPlayer(ADMIN_ID, 'Moderator', 'admin');
     this.addPlayer(PLAYER_ID, 'KoJesko');
     this.players.get(PLAYER_ID)!.token = { token_id: 'tok_4hq9x2', created_at: NOW, last_used_at: NOW };
-    this.addJob({ job_id: '7K2M9QXA', game: 'ets2', owner: PLAYER_ID, outcome: 'valid', points: 7.0, scored_points: 7.0, world_km: 11.38, game_km: 125.7 });
+    this.addJob({ job_id: '7K2M9QXA', game: 'ets2', owner: PLAYER_ID, outcome: 'valid', points: 7.0, scored_points: 7.0, world_km: 11.38, game_km: 125.7, fuel_l: 41.2, damage_pct: 1.5, income: 4210 });
     this.addJob({ job_id: '4QH82KDM', game: 'ats', owner: PLAYER_ID, outcome: 'discarded', points: 0, scored_points: 0, world_km: 0, game_km: 0 });
     this.addJob({ job_id: 'R3VW5T6Y', game: 'ets2', owner: PLAYER_ID, outcome: 'pending_review', points: null, held_points: 90.3, scored_points: 90.3, world_km: 145.33, game_km: 2512 });
     this.addJob({ job_id: 'H8JK2MNP', game: 'ats', owner: PLAYER_ID, outcome: 'invalid', points: 0, scored_points: 32.7, world_km: 52.4, game_km: 1048 });
@@ -324,6 +341,15 @@ export class MockPlasmaTrackServer {
       const j = this.jobs.get(m[1]!);
       return j ? ok(this.detail(j)) : err(404, 'not_found', { resource: 'job' });
     }
+    if ((m = /^\/public\/(ets2|ats)\/players\/(\d{17,20})\/history$/.exec(path))) {
+      const h = this.history(m[1] as Job['game'], m[2]!, q.get('bucket') ?? 'week');
+      return h ? ok(h) : err(400, 'bad_request', { bucket: 'day, week or month' });
+    }
+    if ((m = /^\/public\/jobs\/([0-9A-Z]{8})\/series$/.exec(path))) {
+      const j = this.jobs.get(m[1]!);
+      const shown = j && j.origin !== 'manual' && (j.outcome === 'valid' || j.outcome === 'approved');
+      return shown ? ok(this.series(j, true)) : err(404, 'not_found', { resource: 'job' });
+    }
     if ((m = /^\/public\/jobs\/([0-9A-Z]{8})\/route$/.exec(path))) {
       const j = this.jobs.get(m[1]!);
       return j && j.origin !== 'manual' ? ok(this.route_(j, false)) : err(404, 'not_found', { resource: 'job' });
@@ -331,22 +357,29 @@ export class MockPlasmaTrackServer {
     if ((m = /^\/public\/(ets2|ats)\/leaderboard$/.exec(path))) {
       const game = m[1] as Job['game'];
       const division = q.get('division') ?? 'all';
+      const sort = q.get('sort') ?? 'points';
+      const field: Record<string, string> = { points: 'points', distance: 'world_km', game_distance: 'game_km', fuel: 'fuel_used_l', income: 'income', damage: 'damage_pct_avg' };
+      if (!field[sort]) return err(400, 'bad_request', { sort: Object.keys(field).join(', ') });
+      const order = q.get('order') ?? (sort === 'damage' ? 'asc' : 'desc');
+      if (order !== 'asc' && order !== 'desc') return err(400, 'bad_request', { order: 'asc or desc' });
+      const key = field[sort]!;
       const rows = [...this.players.values()]
         .filter((p) => !p.disabled && (division !== 'singleplayer' || p.singleplayer_division))
-        .map((p) => ({ p, s: this.stats(p.discord_user_id, game) }))
-        .filter((r) => r.s.job_count > 0)
-        .sort((a, b2) => b2.s.points - a.s.points);
+        .map((p) => ({ p, t: this.totals([...this.jobs.values()].filter((j) => j.owner === p.discord_user_id && j.game === game)) }))
+        .filter((r) => (r.t['job_count'] as number) > 0)
+        .sort((a, b2) => {
+          const x = a.t[key] as number | null;
+          const y = b2.t[key] as number | null;
+          // Players without a value rank last.
+          if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+          return order === 'asc' ? x - y : y - x;
+        });
       const items = rows.map((r, i) => ({
         rank: i + 1,
         user_id: r.p.user_id,
         discord_user_id: r.p.discord_user_id,
         display_name: r.p.display_name,
-        points: r.s.points,
-        job_count: r.s.job_count,
-        world_km: r.s.world_km,
-        world_mi: r.s.world_mi,
-        game_km: r.s.game_km,
-        game_mi: r.s.game_mi,
+        ...r.t,
       }));
       const pg = this.page(items, q, true);
       return ok({
@@ -354,6 +387,9 @@ export class MockPlasmaTrackServer {
         period: q.get('period') ?? 'all',
         at: q.get('at'),
         division,
+        sort,
+        order,
+        currency: game === 'ets2' ? 'EUR' : 'USD',
         period_start: null,
         period_end: null,
         generated_at: NOW,
@@ -398,16 +434,7 @@ export class MockPlasmaTrackServer {
       if (!j || j.origin === 'manual') return err(404, 'not_found', { resource: 'job' });
       const max = Math.min(4000, Number(q.get('max_points') ?? 1000));
       if (!Number.isInteger(max) || max < 1) return err(400, 'bad_request', { max_points: 'invalid' });
-      return ok({
-        job_id: j.job_id,
-        game: j.game,
-        bucket_s: 1.15,
-        penalty_over_mph: 100,
-        invalid_over_mph: 150,
-        points: [{ t: '2026-10-13T21:05:47.000Z', speed_mph_min: 0, speed_mph_max: 3.1, fuel_l_min: 612.4, fuel_l_max: 612.5, reverted: false }],
-        windows: [{ kind: 'train', from: '2026-10-13T21:20:16.000Z', to: '2026-10-13T21:20:24.000Z' }],
-        markers: [],
-      });
+      return ok(this.series(j, false));
     }
     if ((m = /^\/admin\/jobs\/([0-9A-Z]{8})\/route$/.exec(path))) {
       const j = this.jobs.get(m[1]!);
@@ -626,14 +653,20 @@ export class MockPlasmaTrackServer {
     if ('bonus_id' in b) fields['bonus_id'] = 'a player never picks a bonus';
     const uk = b['uk'] as Json | undefined;
     if (uk && b['game'] !== 'ets2') fields['uk'] = 'ETS2 only';
-    const images: { id: string; role: string; field: string }[] = [];
+    const images: { id: string; role: string; field: string; section?: number }[] = [];
     const evidence = Array.isArray(b['evidence']) ? (b['evidence'] as unknown[]) : [];
     if (evidence.length < 1 || evidence.length > 5) fields['evidence'] = '1 to 5 images';
     evidence.forEach((id, i) => images.push({ id: String(id), role: 'main', field: `evidence[${i}]` }));
     if (b['custom_map'] !== undefined) images.push({ id: String(b['custom_map']), role: 'custom_map', field: 'custom_map' });
     if (uk?.['route_evidence'] !== undefined) images.push({ id: String(uk['route_evidence']), role: 'uk_route', field: 'uk.route_evidence' });
-    const adj = b['adjusted_scale'] as Json | undefined;
-    if (adj?.['evidence'] !== undefined) images.push({ id: String(adj['evidence']), role: 'adjusted_scale', field: 'adjusted_scale.evidence' });
+    if ('adjusted_scale' in b) fields['adjusted_scale'] = 'replaced by adjusted_scales, a list';
+    const sections = Array.isArray(b['adjusted_scales']) ? (b['adjusted_scales'] as Json[]) : [];
+    checkSections(sections, b['unit'], fields, true);
+    const parts = sections.reduce((sum, s) => sum + (Number(s['distance']) || 0), 0) + (uk ? Number(uk['distance']) || 0 : 0);
+    if (num('distance') && parts > (b['distance'] as number)) fields['adjusted_scales'] = 'the UK stretch and the sections are part of distance and cannot exceed it';
+    sections.forEach((s, i) => {
+      if (s['evidence'] !== undefined) images.push({ id: String(s['evidence']), role: 'adjusted_scale', field: `adjusted_scales[${i}].evidence`, section: i });
+    });
     for (const img of images) {
       const e = this.evidence.get(img.id);
       if (!e || e.owner !== discordId || e.used) fields[img.field] = 'not an unused image of this player';
@@ -650,7 +683,7 @@ export class MockPlasmaTrackServer {
       delivered_at: NOW,
       origin: 'manual',
       submission: structuredClone(b),
-      evidence: images.map((i) => ({ id: i.id, role: i.role })),
+      evidence: images.map((i) => ({ id: i.id, role: i.role, ...(i.section !== undefined ? { section: i.section } : {}) })),
       hide_map: false,
       overrides: {},
     });
@@ -660,16 +693,17 @@ export class MockPlasmaTrackServer {
     return { status: 201, json: this.detail(job) };
   }
 
-  /** World distance the manual way (PUBLIC_API §6): (D − UK − adj) ÷ scale + UK ÷ 15 + adj ÷ its scale. */
+  /** World distance the manual way (PUBLIC_API §6): (D − UK − Σsections) ÷ scale + UK ÷ 15 + Σ(section ÷ its scale). */
   private rescoreManual(j: Job) {
     const s = this.sheetInput(j);
     const k = s['unit'] === 'mi' ? KM_PER_MI : 1;
     const d = Number(s['distance']) * k;
     const uk = s['uk'] ? Number((s['uk'] as Json)['distance'] ?? 0) * k : 0;
-    const adj = s['adjusted_scale'] as Json | undefined;
-    const adjKm = adj ? Number(adj['distance'] ?? 0) * k : 0;
+    const sections = (s['adjusted_scales'] as Json[] | null | undefined) ?? [];
+    const adjKm = sections.reduce((sum, a) => sum + Number(a['distance'] ?? 0) * k, 0);
+    const adjWorld = sections.reduce((sum, a) => sum + (Number(a['distance'] ?? 0) * k) / Number(a['scale'] ?? 1), 0);
     const scale = typeof s['map_scale'] === 'number' ? (s['map_scale'] as number) : j.game === 'ets2' ? 19 : 20;
-    const world = (d - uk - adjKm) / scale + uk / 15 + (adj ? adjKm / Number(adj['scale'] ?? 1) : 0);
+    const world = (d - uk - adjKm) / scale + uk / 15 + adjWorld;
     j.game_km = round2(d);
     j.world_km = round2(world);
     j.scored_points = Math.floor(world / KM_PER_MI);
@@ -679,7 +713,8 @@ export class MockPlasmaTrackServer {
   private sheetInput(j: Job): Json {
     const base: Json = structuredClone(j.submission ?? {});
     for (const [k, v] of Object.entries(j.overrides ?? {})) {
-      if ((k === 'uk' || k === 'adjusted_scale') && v && typeof v === 'object' && base[k]) base[k] = { ...(base[k] as Json), ...(v as Json) };
+      // adjusted_scales overrides are stored as the whole resulting list (see applyEdit).
+      if (k === 'uk' && v && typeof v === 'object' && base[k]) base[k] = { ...(base[k] as Json), ...(v as Json) };
       else base[k] = v;
     }
     return base;
@@ -690,7 +725,17 @@ export class MockPlasmaTrackServer {
     const changes = Object.fromEntries(Object.entries(b).filter(([k]) => k !== 'reason' && k !== 'expected_etag'));
     const fields: Record<string, string> = {};
     for (const k of Object.keys(changes)) if (!EDIT_FIELDS.has(k)) fields[k] = 'unknown field';
-    const distances = ['distance', 'uk', 'adjusted_scale'].some((k) => changes[k] !== undefined && changes[k] !== null);
+    const distances =
+      ['distance', 'uk'].some((k) => changes[k] !== undefined && changes[k] !== null) ||
+      Object.values((changes['adjusted_scales'] as Json | null | undefined) ?? {}).some((s) => s && typeof s === 'object' && 'distance' in (s as Json));
+    // Sections are edited by number in the current list; store the resulting list.
+    if (changes['adjusted_scales'] !== undefined) {
+      const edited = this.editSections(j, changes['adjusted_scales'], fields);
+      if (edited) {
+        checkSections(edited, changes['unit'] ?? this.sheetInput(j)['unit'], fields, false);
+        changes['adjusted_scales'] = edited.length > 0 ? edited : null;
+      }
+    }
     if (distances && changes['unit'] !== 'mi' && changes['unit'] !== 'km') fields['unit'] = 'needed with a distance';
     if (typeof changes['fuel_used'] === 'number' && !changes['fuel_unit']) fields['fuel_unit'] = 'needed with fuel_used';
     const real = Object.keys(changes).filter((k) => k !== 'unit' && k !== 'fuel_unit');
@@ -715,11 +760,31 @@ export class MockPlasmaTrackServer {
     return null;
   }
 
-  private evidenceItem(e: { id: string; role: string }): Json {
+  /** ADMIN_API §14 section edits: a list replaces, null clears, keys change/remove/append. */
+  private editSections(j: Job, edit: unknown, fields: Record<string, string>): Json[] | null {
+    if (edit === null) return [];
+    if (Array.isArray(edit)) return edit as Json[];
+    const current = structuredClone(((this.sheetInput(j)['adjusted_scales'] as Json[] | null | undefined) ?? []));
+    const result: (Json | null)[] = [...current];
+    for (const [key, value] of Object.entries(edit as Json)) {
+      const n = Number(key);
+      if (!Number.isInteger(n) || n < 0 || n > current.length) {
+        fields[`adjusted_scales[${key}]`] = 'no such section';
+        continue;
+      }
+      if (value === null) result[n] = null;
+      else if (n === current.length) result.push(value as Json);
+      else result[n] = { ...(current[n] as Json), ...(value as Json) };
+    }
+    return result.filter((s): s is Json => s !== null);
+  }
+
+  private evidenceItem(e: { id: string; role: string; section?: number }): Json {
     const ev = this.evidence.get(e.id);
     return {
       evidence_id: e.id,
       role: e.role,
+      section: e.section ?? null,
       content_type: ev?.content_type ?? 'image/webp',
       size_bytes: ev?.bytes.length ?? 0,
       url: `${BASE_URL}/dl/evidence/${e.id}?exp=1792000000&sig=x`,
@@ -762,9 +827,16 @@ export class MockPlasmaTrackServer {
           destination_city: s['end_city'],
           destination_company: s['end_company'],
           uk: s['uk'] ? { ...(s['uk'] as Json), distance_km: round2(Number((s['uk'] as Json)['distance']) * k) } : null,
-          adjusted_scale: s['adjusted_scale'] ? { ...(s['adjusted_scale'] as Json), distance_km: round2(Number((s['adjusted_scale'] as Json)['distance']) * k) } : null,
+          adjusted_scales: ((s['adjusted_scales'] as Json[] | null | undefined) ?? []).map((a) => ({
+            entry_city: a['entry_city'],
+            exit_city: a['exit_city'],
+            scale: a['scale'],
+            distance_km: round2(Number(a['distance']) * k),
+            distance_mi: round2((Number(a['distance']) * k) / KM_PER_MI),
+            evidence_id: a['evidence'] ?? null,
+          })),
         }
-      : { distance_km: j.game_km, distance_mi: round2(j.game_km / KM_PER_MI), cargo_name: 'Vaccines', damage_pct: null, profit: null, truck: null, map_scale: null, uk: null, adjusted_scale: null };
+      : { distance_km: j.game_km, distance_mi: round2(j.game_km / KM_PER_MI), cargo_name: 'Vaccines', damage_pct: null, profit: null, truck: null, map_scale: null, uk: null, adjusted_scales: null };
     return {
       ...this.detail(j),
       reasons: this.reasons(j),
@@ -874,6 +946,7 @@ export class MockPlasmaTrackServer {
         reported_delivered_at: s['ended_at'],
         multiplayer: { kind: 'unknown', truckersmp: null },
         origin: 'manual',
+        ...this.extras(j),
       };
     }
     return {
@@ -894,9 +967,115 @@ export class MockPlasmaTrackServer {
       delivered_at: j.delivered_at,
       reported_delivered_at: '2026-10-13T21:25:00.070Z',
       multiplayer: { kind: 'singleplayer', truckersmp: null },
+      ...this.extras(j),
       some_future_field: { ignored: true },
     };
   }
+
+  /** fuel_used_l, damage_pct, income and currency (server 69fcfe9). Manual jobs use the sheet. */
+  private extras(j: Job): Json {
+    const currency = j.game === 'ets2' ? 'EUR' : 'USD';
+    if (j.origin === 'manual') {
+      const s = this.sheetInput(j);
+      const perL: Record<string, number> = { l: 1, us_gal: 3.785411784, uk_gal: 4.54609 };
+      const fuel = typeof s['fuel_used'] === 'number' ? round2((s['fuel_used'] as number) * (perL[String(s['fuel_unit'])] ?? 1)) : null;
+      return { fuel_used_l: fuel, damage_pct: (s['damage'] as number | undefined) ?? null, income: (s['profit'] as number | undefined) ?? null, currency };
+    }
+    return { fuel_used_l: j.fuel_l ?? null, damage_pct: j.damage_pct ?? null, income: j.income ?? null, currency };
+  }
+
+  /** Totals of valid and approved jobs, as in history buckets and leaderboard items. */
+  private totals(jobs: Job[]): Json {
+    const counted = jobs.filter((j) => j.outcome === 'valid' || j.outcome === 'approved');
+    const sum = (f: (j: Job) => number) => round2(counted.reduce((n, j) => n + f(j), 0));
+    const ex = counted.map((j) => this.extras(j));
+    const damages = ex.map((e) => e['damage_pct']).filter((d): d is number => typeof d === 'number');
+    return {
+      job_count: counted.length,
+      points: sum((j) => j.points ?? 0),
+      world_km: sum((j) => j.world_km),
+      world_mi: sum((j) => j.world_km / KM_PER_MI),
+      game_km: sum((j) => j.game_km),
+      game_mi: sum((j) => j.game_km / KM_PER_MI),
+      fuel_used_l: round2(ex.reduce((n, e) => n + ((e['fuel_used_l'] as number | null) ?? 0), 0)),
+      income: ex.reduce((n, e) => n + ((e['income'] as number | null) ?? 0), 0),
+      damage_pct_avg: damages.length > 0 ? round2(damages.reduce((a, b) => a + b, 0) / damages.length) : null,
+    };
+  }
+
+  /** GET /public/{game}/players/{id}/history: every bucket up to now, empty ones as zeros. */
+  private history(game: Job['game'], discordId: string, bucket: string): Json | null {
+    const count = ({ day: 30, week: 12, month: 12 } as Record<string, number>)[bucket];
+    if (!count) return null;
+    const DAY = 86_400_000;
+    const startOf = (ms: number) => {
+      const d = new Date(ms);
+      const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+      if (bucket === 'day') return day;
+      if (bucket === 'month') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+      return day - ((d.getUTCDay() + 6) % 7) * DAY; // ISO weeks start on Monday
+    };
+    const step = (ms: number, n: number) => {
+      const d = new Date(ms);
+      if (bucket === 'month') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1);
+      return ms + n * (bucket === 'day' ? 1 : 7) * DAY;
+    };
+    const start = step(startOf(Date.parse(NOW)), -(count - 1));
+    const jobs = [...this.jobs.values()].filter((j) => j.game === game && j.owner === discordId);
+    const before = (ms: number) => jobs.filter((j) => Date.parse(j.delivered_at) < ms);
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const items: Json[] = [];
+    for (let i = 0; i < count; i++) {
+      const b = step(start, i);
+      const e = step(start, i + 1);
+      const inside = jobs.filter((j) => Date.parse(j.delivered_at) >= b && Date.parse(j.delivered_at) < e);
+      items.push({ start: iso(b), end: iso(e), ...this.totals(inside), running: this.totals(before(e)) });
+    }
+    return {
+      game,
+      discord_user_id: discordId,
+      bucket,
+      currency: game === 'ets2' ? 'EUR' : 'USD',
+      from: iso(start),
+      to: items.at(-1)!['end'],
+      before: this.totals(before(start)),
+      items,
+    };
+  }
+
+  /** Series points (ADMIN_API §5, and the public series of server 69fcfe9). */
+  private series(j: Job, publicView: boolean): Json {
+    const points = [0, 1, 2, 3].map((i) => ({
+      t: new Date(Date.parse('2026-10-13T21:05:47.000Z') + i * 300_000).toISOString(),
+      speed_mph_min: 0,
+      speed_mph_max: [3.1, 52, 61, 0][i],
+      fuel_l_min: 612.4 - i * 10,
+      fuel_l_max: 612.5 - i * 10,
+      damage_pct_min: i * 0.5,
+      damage_pct_max: i * 0.5,
+      game_km: round2((j.game_km * i) / 3),
+      game_mi: round2((j.game_km * i) / 3 / KM_PER_MI),
+      world_km: round2((j.world_km * i) / 3),
+      world_mi: round2((j.world_km * i) / 3 / KM_PER_MI),
+      reverted: false,
+    }));
+    const windows = [
+      { kind: 'train', from: '2026-10-13T21:12:16.000Z', to: '2026-10-13T21:12:24.000Z' },
+      { kind: 'reverted', from: '2026-10-13T21:14:00.000Z', to: '2026-10-13T21:15:00.000Z' },
+    ];
+    return {
+      job_id: j.job_id,
+      game: j.game,
+      bucket_s: 300,
+      penalty_over_mph: 100,
+      invalid_over_mph: 150,
+      points,
+      // The public view hides reverted parts and review markers.
+      windows: publicView ? windows.filter((w) => w.kind !== 'reverted') : windows,
+      markers: publicView ? [] : [{ kind: 'fuel_jump', at: '2026-10-13T21:13:00.000Z', litres: 35 }],
+    };
+  }
+
 
   private detail(j: Job): Json {
     const zero = { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 };

@@ -10,7 +10,7 @@ import type { OutgoingFile } from '../discord/rest.ts';
 import type { CommandDefinition, TaskDefinition, TaskDeps } from '../interactions/types.ts';
 import { SCALE_CLASS_LABELS, SCALE_CLASSES } from '../render/protocol.ts';
 import { discordTime, distance, escapeMarkdown, GAME_SHORT, OUTCOME_LABELS, pointsText } from './format.ts';
-import { MAX_EVIDENCE_BYTES } from './manual-fields.ts';
+import { MAX_EVIDENCE_BYTES, money } from './manual-fields.ts';
 import { booleanOption, PRIVATE_OPTION, stringOption } from './options.ts';
 import { evidenceButton } from './submit.ts';
 import { sniffImageType } from '../media.ts';
@@ -120,6 +120,13 @@ export function jobEmbed(job: JobDetail): APIEmbed {
     fields.push({ name: 'Bonus', value: `${escapeMarkdown(job.bonus.label)} (${amount})`, inline: true });
   }
   if (job.speed_penalty_applied) fields.push({ name: 'Speed penalty', value: '0.85× distance', inline: true });
+  // Public since server 69fcfe9; null when unknown.
+  if (typeof job.fuel_used_l === 'number') {
+    const gal = Math.round((job.fuel_used_l / 3.785411784) * 100) / 100;
+    fields.push({ name: 'Fuel used', value: job.game === 'ats' ? `${gal} gal (${job.fuel_used_l} L)` : `${job.fuel_used_l} L`, inline: true });
+  }
+  if (typeof job.damage_pct === 'number') fields.push({ name: 'Cargo damage', value: `${job.damage_pct}%`, inline: true });
+  if (typeof job.income === 'number') fields.push({ name: 'Income', value: money(job.income, job.game), inline: true });
 
   const scale = scaleBreakdown(job);
   if (scale) fields.push({ name: 'Distance by map scale', value: scale });

@@ -243,6 +243,7 @@ export function taskDeps(clock = new FakeClock()) {
   const renderer = {
     renderRoute: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
     renderChart: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
+    renderBars: async () => ({ bytes: new Uint8Array(), contentType: 'image/png', cached: false }),
   };
   /** Images "compressed" by the fake: an AVIF header plus the input's length. */
   const images: ImageCompressor & { calls: number; fail: Error | null } = {

@@ -1,5 +1,6 @@
 import type { InteractionHandlers, TaskDefinition } from '../interactions/types.ts';
 import { aboutCommand } from './about.ts';
+import { graphCommand, graphJobTask, graphLeaderboardTask, graphPlayerTask } from './graph.ts';
 import { historyCommand, historyComponent, historyTask, statsCommand, statsTask } from './history.ts';
 import { jobCommand, jobTask } from './job.ts';
 import {
@@ -38,6 +39,7 @@ import {
   evidenceComponent,
   jobEvidenceTask,
   submitAdjustedTask,
+  submitRemoveSectionTask,
   submitCancelTask,
   submitCommand,
   submitComponent,
@@ -66,6 +68,7 @@ export const handlers: InteractionHandlers = {
     leaderboardCommand,
     statsCommand,
     historyCommand,
+    graphCommand,
     submitCommand,
     // Moderators
     reviewCommand,
@@ -111,8 +114,12 @@ export const tasks: TaskDefinition[] = [
   leaderboardTask,
   statsTask,
   historyTask,
+  graphPlayerTask,
+  graphJobTask,
+  graphLeaderboardTask,
   submitPrepareTask,
   submitAdjustedTask,
+  submitRemoveSectionTask,
   submitSendTask,
   submitCancelTask,
   jobEvidenceTask,

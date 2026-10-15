@@ -9,6 +9,7 @@ export const RENDER_PROTOCOL_VERSION = 2;
 
 export const ROUTE_PATH = '/v1/render/route';
 export const CHART_PATH = '/v1/render/chart';
+export const BARS_PATH = '/v1/render/bars';
 /** Body: the raw image (PNG, JPEG, WebP or AVIF). Answer: AVIF, at most COMPRESSED_MAX_EDGE px on the long side. */
 export const COMPRESS_PATH = '/v1/compress/image';
 export const COMPRESSED_MAX_EDGE = 1920;
@@ -152,6 +153,34 @@ export const chartRenderRequestSchema = z.object({
 
 export type ChartRenderRequest = z.input<typeof chartRenderRequestSchema>;
 export type ParsedChartRenderRequest = z.output<typeof chartRenderRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Labelled charts (owner, 2026-10-15): a player's totals per day/week/month
+// (columns), their running total (line), or a leaderboard comparison (rows).
+
+export const BARS_KINDS = ['columns', 'line', 'rows'] as const;
+export type BarsKind = (typeof BARS_KINDS)[number];
+
+export const barsRenderRequestSchema = z
+  .object({
+    title: z.string().max(100),
+    /** Unit label of the value axis, e.g. "mi" or "€". */
+    unit: z.string().max(16),
+    kind: z.enum(BARS_KINDS).default('columns'),
+    width: z.number().int().min(320).max(2048).default(1200),
+    height: z.number().int().min(240).max(2048).default(500),
+    /** One per value: a date for columns and lines, a player's name for rows. */
+    labels: z.array(z.string().max(40)).min(1).max(400),
+    /** `null` is no data (drawn as nothing), not zero. */
+    values: z.array(z.number().nullable()).min(1).max(400),
+    /** Rows only: the text at the end of each bar, e.g. "820 mi". */
+    value_labels: z.array(z.string().max(24)).max(400).optional(),
+  })
+  .refine((r) => r.labels.length === r.values.length, { message: 'labels and values must be the same length' })
+  .refine((r) => !r.value_labels || r.value_labels.length === r.values.length, { message: 'value_labels must match values' });
+
+export type BarsRenderRequest = z.input<typeof barsRenderRequestSchema>;
+export type ParsedBarsRenderRequest = z.output<typeof barsRenderRequestSchema>;
 
 // ---------------------------------------------------------------------------
 // Request signing (HMAC-SHA256 with a shared key)

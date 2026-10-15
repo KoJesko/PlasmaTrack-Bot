@@ -207,6 +207,15 @@ downsampling.
 ```
 
 - **Speed** is world mph, the same as the speedometer.
+- **Each point also has** (owner, 2026-10-15, for graphs):
+  - `damage_pct_min` and `damage_pct_max`: cargo damage 0–100, or `null` where not reported;
+  - `game_km`/`game_mi`: the odometer distance from the job's start, all driving;
+  - `world_km`/`world_mi`: the scored part at 1:1 from the start.
+
+  The distances are taken at the bucket's end. Older jobs show `null` damage until their data is
+  replayed.
+- **Public version:** `GET /api/v1/public/jobs/{job_id}/series`, for `valid` and `approved` jobs
+  only, without reverted windows and review markers (PUBLIC_API §3).
 - **Pauses, ferries and trains** are excluded from overspeed. Their windows are listed so the
   chart can shade them.
 - **Size:** about 120 bytes per point, so 4000 points stay under 500 KB.
@@ -493,11 +502,25 @@ Corrects any field of **any** job, tracked or manual:
 - **Fields:** the same names as a manual submission (PUBLIC_API §6):
   - places, `cargo_name`, `truck`, `truck_model`, `mod_names`;
   - `distance`, `fuel_used`, `damage`, `profit`, `started_at`, `ended_at`;
-  - `map_scale`, `uk`, `adjusted_scale`, plus `bonus_id`.
+  - `map_scale`, `uk`, `adjusted_scales`, plus `bonus_id`.
 - **Units and rules for fields:**
   - **Units:** `unit` is needed with any distance, `fuel_unit` with `fuel_used`.
-  - **`uk` and `adjusted_scale`** may be partial (`{"uk": {"entry_city": "Dover"}}`), and
-    `null` removes the section. Their images cannot be changed.
+  - **`uk`** may be partial (`{"uk": {"entry_city": "Dover"}}`), and `null` removes it.
+  - **`adjusted_scales`** is edited by section number, counting from 0 in the current list
+    (the admin detail's `sheet`):
+
+    ```json
+    {"adjusted_scales": {"0": {"distance": 12}, "2": null, "3": {"entry_city": "…", "exit_city": "…", "distance": 4, "scale": 1}}}
+    ```
+
+    - **Change a section:** give an object with any of its fields.
+    - **Remove one:** `null`.
+    - **Add one:** use the next number, here 3 for a list of three; it needs every field except
+      the image.
+    - **Replace the whole list:** send a list (no images).
+    - **Remove them all:** `null`.
+    - **Limits:** at most 5 sections, and the city-scale minimum (PUBLIC_API §6) applies.
+  - **Images** of `uk` and the sections cannot be changed.
   - **Clearing:** `null` clears `damage`, `profit`, `fuel_used`, `truck`, `truck_model`,
     `mod_names` and `map_scale` (back to the game's default); `null` on `bonus_id` means no
     bonus. Other fields cannot be cleared.
@@ -511,7 +534,7 @@ Corrects any field of **any** job, tracked or manual:
   - **Names, fuel, damage, profit, times, truck and mods:** shown values only.
   - **`distance` alone** on a tracked job: the job's own city/road mix is kept, so world
     distance scales with it.
-  - **`map_scale`, `uk` or `adjusted_scale`** on a tracked job: its world distance is worked
+  - **`map_scale`, `uk` or `adjusted_scales`** on a tracked job: its world distance is worked
     out the manual way (PUBLIC_API §6).
   - **`bonus_id`:** replaces the automatic bonus choice. It must be a bonus of the job's game,
     in any state.
@@ -526,3 +549,19 @@ Corrects any field of **any** job, tracked or manual:
 
 - **Webhooks:** `job.scored` with `by: {"kind": "moderator", …}` when the points changed.
 - **Audit:** `job.edit`, with outcome, points and overrides before and after.
+
+## 15. Backups (owner, 2026-10-15)
+
+### `POST /api/v1/admin/backups`
+
+Writes a backup of the server's database now, besides the automatic weekly one
+(docs/SERVER.md). Body: `{"reason": "…"}`. Audited as `backup.create`.
+
+**`201`:**
+
+```json
+{"key": "d1/plasmatrack-server/2026-10-15T20-00-00.000Z.sql", "size_bytes": 104845,
+ "rows": {"jobs": 7, "users": 6, "…": 0}, "deleted": ["d1/plasmatrack-server/2026-10-04T03-47-00.000Z.sql"]}
+```
+
+Only the newest two backups are kept, so `deleted` lists what this one replaced.

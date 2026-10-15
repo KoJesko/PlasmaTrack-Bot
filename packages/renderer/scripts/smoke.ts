@@ -1,5 +1,5 @@
 // Smoke test for a running renderer (used by .github/workflows/renderer-image.yml
-// against the freshly built image): draws a route and a chart, and shrinks an
+// against the freshly built image): draws a route, a chart and a bar chart, and shrinks an
 // image to AVIF, through the bot's own signed client.
 //
 // Usage: RENDERER_URL=http://127.0.0.1:8788 RENDERER_KEY=... node packages/renderer/scripts/smoke.ts
@@ -25,11 +25,13 @@ const map = await client.renderRoute({
   },
 });
 const chart = await client.renderChart({ title: 'Speed', unit: 'mph', points: [[0, 10], [60, 55], [120, 40]] });
+const bars = await client.renderBars({ title: 'Distance per week', unit: 'mi', labels: ['W40', 'W41', 'W42'], values: [120, null, 80] });
 const avif = await client.compressImage(chart.bytes, 'image/png');
 
 const checks = [
   ['route map is a PNG', sniffImageType(map.bytes) === 'image/png'],
   ['chart is a PNG', sniffImageType(chart.bytes) === 'image/png'],
+  ['bar chart is a PNG', sniffImageType(bars.bytes) === 'image/png'],
   ['compressed image is AVIF', sniffImageType(avif.bytes) === 'image/avif'],
 ] as const;
 for (const [name, ok] of checks) console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`);

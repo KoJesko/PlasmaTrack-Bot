@@ -15,6 +15,7 @@ import {
   jobEvidenceSchema,
   jobSummarySchema,
   leaderboardSchema,
+  playerHistorySchema,
   operationSchema,
   pageSchema,
   playerProfileSchema,
@@ -35,7 +36,9 @@ import {
   type Decision,
   type Division,
   type Game,
+  type HistoryBucket,
   type LeaderboardPeriod,
+  type LeaderboardSort,
 } from './schemas.ts';
 
 // Client for the PlasmaTrack server API v1 (docs/contract/). Platform-free:
@@ -219,12 +222,24 @@ export class PlasmaTrackApi {
     return this.request('GET', `/public/jobs/${jobId}/route`, serverRouteSchema);
   }
 
+  /** A valid or approved tracked job's series, without reverted parts (404 for any other job). */
+  getJobSeries(jobId: string, maxPoints = 1000) {
+    return this.request('GET', `/public/jobs/${jobId}/series`, seriesSchema, { query: { max_points: maxPoints } });
+  }
+
   getLeaderboard(
     game: Game,
-    options: ListOptions & { period?: LeaderboardPeriod; at?: string; division?: Division } = {},
+    options: ListOptions & { period?: LeaderboardPeriod; at?: string; division?: Division; sort?: LeaderboardSort; order?: 'asc' | 'desc' } = {},
   ) {
     return this.request('GET', `/public/${game}/leaderboard`, leaderboardSchema, {
-      query: { ...listQuery(options), period: options.period, at: options.at, division: options.division },
+      query: { ...listQuery(options), period: options.period, at: options.at, division: options.division, sort: options.sort, order: options.order },
+    });
+  }
+
+  /** Per-bucket totals of valid and approved jobs; `from`/`to` default on the server. */
+  getPlayerHistory(game: Game, discordId: string, options: { bucket: HistoryBucket; from?: string; to?: string }) {
+    return this.request('GET', `/public/${game}/players/${discordId}/history`, playerHistorySchema, {
+      query: { bucket: options.bucket, from: options.from, to: options.to },
     });
   }
 
@@ -555,14 +570,28 @@ export interface ManualJobInput {
   /** Server default: ATS 20, ETS2 19. */
   map_scale?: number;
   uk?: { distance: number; entry_city: string; end_city: string; route_evidence: string };
-  adjusted_scale?: { entry_city: string; exit_city: string; distance: number; scale: number; evidence: string };
+  /** 0–5 sections driven at another scale (PUBLIC_API §6). */
+  adjusted_scales?: AdjustedSectionInput[];
   evidence: string[];
   custom_map?: string;
 }
 
+export interface AdjustedSectionInput {
+  entry_city: string;
+  exit_city: string;
+  distance: number;
+  scale: number;
+  evidence: string;
+}
+
+/** A section's fields as an edit may change them (no image). */
+export type AdjustedSectionEdit = Partial<Omit<AdjustedSectionInput, 'evidence'>>;
+
 /**
  * ADMIN_API §14: any field of any job. `null` clears damage, profit, fuel_used,
- * truck, truck_model, mod_names, map_scale, uk, adjusted_scale and bonus_id.
+ * truck, truck_model, mod_names, map_scale, uk, adjusted_scales and bonus_id.
+ * `adjusted_scales` is keyed by section number in the current sheet: an object changes
+ * that section, `null` removes it, the next number appends.
  */
 export interface JobEdit {
   unit?: DistanceUnit;
@@ -583,7 +612,7 @@ export interface JobEdit {
   mod_names?: string[] | null;
   map_scale?: number | null;
   uk?: { distance?: number; entry_city?: string; end_city?: string } | null;
-  adjusted_scale?: { entry_city?: string; exit_city?: string; distance?: number; scale?: number } | null;
+  adjusted_scales?: Record<string, AdjustedSectionEdit | null> | null;
   bonus_id?: string | null;
 }
 

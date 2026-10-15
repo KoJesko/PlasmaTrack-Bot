@@ -64,6 +64,9 @@ const RESPONSES: Record<string, z.ZodType> = {
   public_job: S.jobDetailSchema,
   public_job_pending: S.jobDetailSchema,
   public_leaderboard: S.leaderboardSchema,
+  public_leaderboard_by_fuel: S.leaderboardSchema,
+  public_player_history: S.playerHistorySchema,
+  public_job_series: S.seriesSchema,
   public_player: S.playerProfileSchema,
   public_player_jobs: page(S.jobSummarySchema),
   public_player_stats: S.gameStatsResponseSchema,
@@ -71,6 +74,9 @@ const RESPONSES: Record<string, z.ZodType> = {
 };
 
 const ROUTES = ['admin_job_route', 'public_job_route'];
+
+/** Endpoints the bot doesn't call (yet), so it has no schema for them. */
+const NOT_CALLED = ['admin_backup_create'];
 
 const WEBHOOKS: Record<string, z.ZodType> = {
   'job.scored': E.jobScoredSchema,
@@ -88,7 +94,7 @@ const issues = (r: { success: boolean; error?: { issues: unknown } }) => (r.succ
 
 describe('server contract examples', () => {
   it('every example file is covered by this test', () => {
-    const covered = new Set([...Object.keys(RESPONSES), ...ROUTES]);
+    const covered = new Set([...Object.keys(RESPONSES), ...ROUTES, ...NOT_CALLED]);
     const unmapped = files.map((f) => f.replace(/\.json$/, '')).filter((n) => !n.startsWith('webhook_') && !covered.has(n));
     expect(unmapped).toEqual([]);
     expect(files.length).toBeGreaterThan(50);

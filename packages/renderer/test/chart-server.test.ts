@@ -115,6 +115,8 @@ describe('renderer HTTP service', () => {
     expect((await decodePng(map.bytes)).width).toBe(400);
     const chart = await client.renderChart({ title: 'Fuel', unit: 'L', points: [[0, 400], [60, 380]] });
     expect((await decodePng(chart.bytes)).height).toBe(500);
+    const bars = await client.renderBars({ title: 'Distance per week', unit: 'mi', labels: ['W41', 'W42'], values: [10, 20], height: 300 });
+    expect((await decodePng(bars.bytes)).height).toBe(300);
   });
 
   it('compresses evidence images to AVIF: at most 1920 px, metadata (GPS) removed', async () => {

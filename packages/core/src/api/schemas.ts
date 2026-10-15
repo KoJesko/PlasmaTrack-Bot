@@ -178,6 +178,12 @@ export const jobSummarySchema = obj({
   reported_delivered_at: timestamp.optional(),
   multiplayer: multiplayerSchema.optional(),
   origin: originSchema,
+  /** Server 69fcfe9: null when unknown. `damage_pct` is cargo damage at delivery. */
+  fuel_used_l: nullableNumber.optional(),
+  damage_pct: nullableNumber.optional(),
+  /** Whole units of `currency` (EUR for ETS2, USD for ATS); a manual job's submitted profit. */
+  income: nullableNumber.optional(),
+  currency: z.string().optional(),
 });
 export type JobSummary = z.infer<typeof jobSummarySchema>;
 
@@ -219,6 +225,8 @@ export type EvidenceUpload = z.infer<typeof evidenceUploadSchema>;
 export const evidenceItemSchema = obj({
   evidence_id: z.string(),
   role: openEnum(EVIDENCE_ROLES),
+  /** For `adjusted_scale` images: the section shown, from 0 as submitted. Null otherwise. */
+  section: z.number().int().nullable().optional(),
   content_type: z.string(),
   size_bytes: z.number().int().optional(),
   url: z.string(),
@@ -254,13 +262,18 @@ export const sheetSchema = obj({
   })
     .nullable()
     .optional(),
-  adjusted_scale: obj({
-    distance_km: nullableNumber.optional(),
-    distance_mi: nullableNumber.optional(),
-    scale: nullableNumber.optional(),
-    entry_city: z.string().nullable().optional(),
-    exit_city: z.string().nullable().optional(),
-  })
+  /** Up to 5 sections at other scales (owner, 2026-10-15), numbered from 0 in this order. */
+  adjusted_scales: z
+    .array(
+      obj({
+        distance_km: nullableNumber.optional(),
+        distance_mi: nullableNumber.optional(),
+        scale: nullableNumber.optional(),
+        entry_city: z.string().nullable().optional(),
+        exit_city: z.string().nullable().optional(),
+        evidence_id: z.string().nullable().optional(),
+      }),
+    )
     .nullable()
     .optional(),
 });
@@ -324,7 +337,14 @@ export const leaderboardEntrySchema = obj({
   world_mi: z.number(),
   game_km: z.number(),
   game_mi: z.number(),
+  fuel_used_l: nullableNumber.optional(),
+  income: nullableNumber.optional(),
+  damage_pct_avg: nullableNumber.optional(),
 });
+
+/** What a leaderboard can rank by (server 69fcfe9). Damage ranks least first by default. */
+export const LEADERBOARD_SORTS = ['points', 'distance', 'game_distance', 'fuel', 'income', 'damage'] as const;
+export type LeaderboardSort = (typeof LEADERBOARD_SORTS)[number];
 
 export const leaderboardSchema = pageSchema(leaderboardEntrySchema).extend({
   game,
@@ -334,8 +354,52 @@ export const leaderboardSchema = pageSchema(leaderboardEntrySchema).extend({
   period_start: timestamp.nullable().optional(),
   period_end: timestamp.nullable().optional(),
   generated_at: timestamp.optional(),
+  sort: z.string().optional(),
+  order: z.string().optional(),
+  currency: z.string().optional(),
 });
 export type Leaderboard = z.infer<typeof leaderboardSchema>;
+
+// ---------------------------------------------------------------------------
+// Player history buckets (PUBLIC_API, server 69fcfe9)
+
+export const HISTORY_BUCKETS = ['day', 'week', 'month'] as const;
+export type HistoryBucket = (typeof HISTORY_BUCKETS)[number];
+
+const historyTotalsShape = {
+  job_count: z.number().int(),
+  points: z.number(),
+  world_km: z.number(),
+  world_mi: z.number(),
+  game_km: z.number(),
+  game_mi: z.number(),
+  fuel_used_l: z.number(),
+  income: z.number(),
+  damage_pct_avg: nullableNumber,
+};
+export const historyTotalsSchema = obj(historyTotalsShape);
+export type HistoryTotals = z.infer<typeof historyTotalsSchema>;
+
+export const playerHistorySchema = obj({
+  game,
+  discord_user_id: z.string(),
+  bucket: z.string(),
+  currency: z.string(),
+  from: timestamp,
+  to: timestamp,
+  /** All-time totals before `from`. */
+  before: historyTotalsSchema,
+  items: z.array(
+    obj({
+      start: timestamp,
+      end: timestamp,
+      ...historyTotalsShape,
+      /** All-time totals up to this bucket's end. */
+      running: historyTotalsSchema,
+    }),
+  ),
+});
+export type PlayerHistory = z.infer<typeof playerHistorySchema>;
 
 // ---------------------------------------------------------------------------
 // Moderation (ADMIN_API)
@@ -409,6 +473,15 @@ export const seriesSchema = obj({
       speed_mph_max: nullableNumber,
       fuel_l_min: nullableNumber.optional(),
       fuel_l_max: nullableNumber.optional(),
+      /** Cargo damage; null for data processed before server 69fcfe9. */
+      damage_pct_min: nullableNumber.optional(),
+      damage_pct_max: nullableNumber.optional(),
+      /** Odometer from the job's start (all driving), at the bucket's end. */
+      game_km: nullableNumber.optional(),
+      game_mi: nullableNumber.optional(),
+      /** The scored part at 1:1 from the start. */
+      world_km: nullableNumber.optional(),
+      world_mi: nullableNumber.optional(),
       reverted: z.boolean().optional(),
     }),
   ),
