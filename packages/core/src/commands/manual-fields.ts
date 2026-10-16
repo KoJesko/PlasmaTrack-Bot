@@ -239,7 +239,8 @@ export function describeChanges(changes: JobEdit): string[] {
   const name = (k: string) => k.replace(/_/g, ' ');
   for (const [k, v] of Object.entries(changes)) {
     if (k === 'unit' || k === 'fuel_unit') continue;
-    if (v === null) lines.push(`${name(k)}: cleared`);
+    if (k === 'speed_penalty') lines.push(v === true ? 'speed penalty: added' : v === false ? 'speed penalty: removed' : 'speed penalty: back to the speed rules');
+    else if (v === null) lines.push(`${name(k)}: cleared`);
     else if (k === 'distance') lines.push(`distance: ${dist(v as number)}`);
     else if (k === 'fuel_used') lines.push(`fuel used: ${changes.fuel_unit ? typedFuel(v as number, changes.fuel_unit) : v}`);
     else if (k === 'uk') lines.push(`UK: ${sectionParts(v as Record<string, unknown>, dist)}`);

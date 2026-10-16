@@ -450,6 +450,23 @@ describe('/post-approve, /post-decline and /edit-job', () => {
     expect(s.server.audit.filter((a) => a['action'] === 'job.edit')).toHaveLength(3);
   });
 
+  it('adds and removes the speed penalty', async () => {
+    const s = setup();
+    const edit = (penalty: string) =>
+      s.run(commandInteraction('edit-job', { ...mod(), options: [sub('speed-penalty', [opt('job', '7K2M9QXA'), opt('reason', 'Checked the video'), opt('penalty', penalty)])] }));
+    const add = await edit('add');
+    expect(add.sent!.content).toContain('Edited job **7K2M-9QXA**: speed penalty: added.');
+    expect(s.server.jobs.get('7K2M9QXA')!.overrides).toMatchObject({ speed_penalty: true });
+    expect(s.server.jobs.get('7K2M9QXA')!.points).toBeCloseTo(7 * 0.85, 2);
+    const remove = await edit('remove');
+    expect(remove.sent!.content).toContain('speed penalty: removed');
+    expect(s.server.jobs.get('7K2M9QXA')!.points).toBeCloseTo(7, 2);
+    const automatic = await edit('automatic');
+    expect(automatic.sent!.content).toContain('speed penalty: back to the speed rules');
+    expect(s.server.jobs.get('7K2M9QXA')!.overrides ?? {}).not.toHaveProperty('speed_penalty');
+    expect(s.server.audit.filter((a) => a['action'] === 'job.edit')).toHaveLength(3);
+  });
+
   it('refuses edits with nothing to change, unknown fields to clear, or a distance without unit', async () => {
     const s = setup();
     const nothing = await s.run(commandInteraction('edit-job', { ...mod(), options: [sub('details', [opt('job', '7K2M9QXA'), opt('reason', 'Nothing')])] }));

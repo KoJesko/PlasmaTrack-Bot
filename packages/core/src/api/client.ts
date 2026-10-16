@@ -631,6 +631,8 @@ export interface JobEdit {
   uk?: { distance?: number; entry_city?: string; end_city?: string } | null;
   adjusted_scales?: Record<string, AdjustedSectionEdit | null> | null;
   bonus_id?: string | null;
+  /** true adds the speed penalty, false removes it, null lets the speed rules decide again. */
+  speed_penalty?: boolean | null;
 }
 
 export interface ReleaseInput {
