@@ -19,7 +19,7 @@ export async function signedRequest(body: unknown, opts: { tamper?: boolean; pat
   return new Request(`https://bot.test${opts.path ?? '/interactions'}`, {
     method: 'POST',
     headers: { 'X-Signature-Ed25519': hex, 'X-Signature-Timestamp': timestamp, 'Content-Type': 'application/json' },
-    body: opts.tamper ? raw.replace('}', ',"x":1}') : raw,
+    body: opts.tamper ? raw.replace(/}$/, ',"x":1}') : raw,
   });
 }
 
