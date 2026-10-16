@@ -46,7 +46,7 @@ async function put(path: string, body: unknown, label: string): Promise<void> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    console.error(`${label}: Discord answered ${res.status}: ${await res.text()}`);
+    console.error(`Discord command registration failed with HTTP ${res.status}.`);
     throw new Error(label);
   }
   const names = ((await res.json()) as { name: string }[]).map((c) => c.name);
