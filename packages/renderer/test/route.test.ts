@@ -86,7 +86,7 @@ describe('route image', () => {
     }
     expect(dark).toBeGreaterThan(50);
     expect(overlaySvg({ width: 800, height: 600, game: 'ats', classes: new Set() })).toContain(
-      MAP_CREDIT_LINE.replace('&', '&amp;'),
+      MAP_CREDIT_LINE.replace(/&/g, '&amp;'),
     );
   });
 
