@@ -59,7 +59,7 @@ let failed = false;
 for (const guildId of guildIds) {
   // One guild failing (e.g. bot not invited yet) shouldn't stop the others.
   try {
-    await put(`/applications/${appId}/guilds/${guildId}/commands`, registration.guild, `guild ${guildId}`);
+    await put(`/applications/${appId}/guilds/${guildId}/commands`, registration.guild, 'guild');
   } catch {
     failed = true;
   }
