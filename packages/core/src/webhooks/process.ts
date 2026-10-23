@@ -25,9 +25,14 @@ import type { OutgoingMessage } from '../discord/rest.ts';
 // Queue-side handling of server webhooks. Delivery is at least once and
 // unordered (server WEBHOOKS §3): events are deduplicated on event_id, DMs on
 // (event, recipient), and job events older than one already seen are skipped.
+// A job's player notification is also sent only once per kind: a server that
+// replays its raw data (after a deploy) sends the same ones again under new
+// event IDs.
 
 /** Longer than the server's 72 h retry window. */
 const EVENT_DEDUPE_TTL_S = 7 * 24 * 3600;
+/** One job's notification of one kind, once; long after anyone would care about a repeat. */
+const NOTIFICATION_DEDUPE_TTL_S = 400 * 24 * 3600;
 /** Discord "Unknown User". */
 const UNKNOWN_USER = 10013;
 
@@ -70,7 +75,17 @@ async function handleEvent(backend: string, event: WebhookEnvelope, deps: EventD
     case 'player.notification': {
       const n = parse(playerNotificationSchema, event, deps.logger);
       if (!n) return;
-      await deliverDm(backend, n.recipient.discord_user_id, notificationDm(n), event.event_id, deps);
+      const once = n.job_id ? `note:${backend}:${n.recipient.discord_user_id}:${n.job_id}:${n.kind}` : null;
+      if (once && !(await deps.dedupe.claim(once, NOTIFICATION_DEDUPE_TTL_S))) {
+        deps.logger.info('repeated player notification ignored', { ...log, kind: n.kind, jobId: n.job_id });
+        return;
+      }
+      try {
+        await deliverDm(backend, n.recipient.discord_user_id, notificationDm(n), event.event_id, deps);
+      } catch (err) {
+        if (once) await deps.dedupe.release(once);
+        throw err;
+      }
       return;
     }
     case 'version.revocation_scheduled': {

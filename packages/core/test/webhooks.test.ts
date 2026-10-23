@@ -193,6 +193,27 @@ describe('webhook processing', () => {
     expect(discord.calls).toHaveLength(1);
   });
 
+  it('sends a job’s notification of one kind only once, even under a new event ID (a server replay)', async () => {
+    const { deps, discord } = taskDeps();
+    await processQueueMessage(webhook(notification('evt_note_1')), [], deps);
+    await processQueueMessage(webhook(notification('evt_note_replayed')), [], deps);
+    expect(discord.calls).toHaveLength(1);
+    const invalid = notification('evt_note_2');
+    invalid.data['kind'] = 'invalid_delivery';
+    await processQueueMessage(webhook(invalid), [], deps);
+    await processQueueMessage(webhook(notification('evt_note_other_backend'), 0, 'test'), [], deps);
+    expect(discord.calls).toHaveLength(3);
+  });
+
+  it('a failed notification DM is retried, not marked as sent', async () => {
+    const { deps, discord } = taskDeps();
+    discord.dmFailures.set(PLAYER, new DiscordApiError(429, 0, 1, 'rate limited'));
+    expect((await processQueueMessage(webhook(notification('evt_a')), [], deps)).status).not.toBe('done');
+    discord.dmFailures.delete(PLAYER);
+    await processQueueMessage(webhook(notification('evt_b')), [], deps);
+    expect(discord.calls.filter((c) => c.op === 'dm')).toHaveLength(1);
+  });
+
   it('keeps the notice for /notices when the player’s DMs are closed', async () => {
     const { deps, discord, notices } = taskDeps();
     discord.dmFailures.set(PLAYER, new DiscordApiError(403, 50007, undefined, 'Cannot send messages to this user'));
