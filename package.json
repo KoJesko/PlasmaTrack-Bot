@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "allowScripts": {
     "@maplibre/maplibre-gl-native@6.4.1": true,
