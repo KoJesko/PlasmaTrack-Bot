@@ -52,6 +52,12 @@ interface Job {
   evidence?: { id: string; role: string; section?: number }[];
   hide_map?: boolean;
   overrides?: Json;
+  /** A moderator put a speed penalty on it (ADMIN_API §14). */
+  speed_penalty?: boolean;
+  /** How it was played; singleplayer when absent. A multiplayer mod has a `name` (PUBLIC_API §3). */
+  multiplayer?: { kind: string; name?: string };
+  /** `false`: the fuel readings were beyond any tank, so fuel used is unknown (server PR #6). */
+  fuel_readable?: false;
 }
 
 interface Evidence {
@@ -67,7 +73,9 @@ const MAX_EVIDENCE_BYTES = 5 * 1024 * 1024;
 const EDIT_FIELDS = new Set([
   'unit', 'fuel_unit', 'start_city', 'start_company', 'end_city', 'end_company', 'cargo_name', 'distance', 'fuel_used', 'damage',
   'profit', 'started_at', 'ended_at', 'truck', 'truck_model', 'mod_names', 'map_scale', 'uk', 'adjusted_scales', 'bonus_id',
+  'speed_penalty',
 ]);
+const SPEED_PENALTY_FACTOR = 0.85;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const MAX_SECTIONS = 5;
 const CITY_RULE_TEXT = 'a city-scale section counts only from 3 mi in game (1 mi real)';
@@ -779,12 +787,20 @@ export class MockPlasmaTrackServer {
     }
     if (distances && changes['unit'] !== 'mi' && changes['unit'] !== 'km') fields['unit'] = 'needed with a distance';
     if (typeof changes['fuel_used'] === 'number' && !changes['fuel_unit']) fields['fuel_unit'] = 'needed with fuel_used';
+    if ('speed_penalty' in changes && changes['speed_penalty'] !== null && typeof changes['speed_penalty'] !== 'boolean') fields['speed_penalty'] = 'true, false or null';
     const real = Object.keys(changes).filter((k) => k !== 'unit' && k !== 'fuel_unit');
     if (real.length === 0 && Object.keys(fields).length === 0) fields['(body)'] = 'nothing to change';
     if (Object.keys(fields).length > 0) return fields;
 
     const before = { points: j.points, held_points: j.held_points, overrides: structuredClone(j.overrides ?? {}) };
     j.overrides = { ...(j.overrides ?? {}), ...changes };
+    if ('speed_penalty' in changes) {
+      // Demo jobs never trip the speed rules, so null means no penalty.
+      const on = changes['speed_penalty'] === true;
+      if (changes['speed_penalty'] === null) delete j.overrides['speed_penalty'];
+      if (on !== (j.speed_penalty === true)) j.scored_points = round2(on ? j.scored_points * SPEED_PENALTY_FACTOR : j.scored_points / SPEED_PENALTY_FACTOR);
+      j.speed_penalty = on;
+    }
     if (j.origin === 'manual') {
       this.rescoreManual(j);
     } else if (typeof changes['distance'] === 'number') {
@@ -841,8 +857,17 @@ export class MockPlasmaTrackServer {
   }
 
   private reasons(j: Job): Json[] {
+    const mod = this.divisionMod(j);
+    if (mod) return [{ code: 'singleplayer_division_multiplayer_mod', text: `A ${mod.name} job by a Singleplayer Division player.`, details: mod }];
     if (j.origin === 'manual') return [{ code: 'manual_submission', text: 'Submitted by hand: a moderator checks the evidence.', details: {} }];
     return j.outcome === 'invalid' ? [{ code: 'overspeed_invalid', details: {} }] : [{ code: 'late_start', text: 'Tracking started after the job was accepted.', details: {} }];
+  }
+
+  /** A discarded job on a multiplayer mod, by a Singleplayer Division player (ADMIN_API §2). */
+  private divisionMod(j: Job): { kind: string; name: string } | null {
+    const mp = j.multiplayer;
+    if (j.outcome !== 'discarded' || !mp?.name || !this.players.get(j.owner)?.singleplayer_division) return null;
+    return { kind: mp.kind, name: mp.name };
   }
 
   private adminDetail(j: Job): Json {
@@ -886,6 +911,7 @@ export class MockPlasmaTrackServer {
       start_kind: manual ? 'manual' : 'tracked',
       timeline: [],
       speed: manual ? null : { peak_mph: 61 },
+      ...(j.fuel_readable === false ? { fuel: { used_l: null, refuels: [] } } : {}),
       integrity: manual ? null : {},
       sheet,
       overrides: j.overrides ?? {},
@@ -1007,7 +1033,7 @@ export class MockPlasmaTrackServer {
       market: 'cargo_market',
       delivered_at: j.delivered_at,
       reported_delivered_at: '2026-10-13T21:25:00.070Z',
-      multiplayer: { kind: 'singleplayer', truckersmp: null },
+      multiplayer: { ...(j.multiplayer ?? { kind: 'singleplayer' }), truckersmp: null },
       ...this.extras(j),
       some_future_field: { ignored: true },
     };
@@ -1022,6 +1048,7 @@ export class MockPlasmaTrackServer {
       const fuel = typeof s['fuel_used'] === 'number' ? round2((s['fuel_used'] as number) * (perL[String(s['fuel_unit'])] ?? 1)) : null;
       return { fuel_used_l: fuel, damage_pct: (s['damage'] as number | undefined) ?? null, income: (s['profit'] as number | undefined) ?? null, currency };
     }
+    if (j.fuel_readable === false) return { fuel_used_l: null, fuel_readable: false, damage_pct: j.damage_pct ?? null, income: j.income ?? null, currency };
     return { fuel_used_l: j.fuel_l ?? null, damage_pct: j.damage_pct ?? null, income: j.income ?? null, currency };
   }
 
@@ -1124,10 +1151,14 @@ export class MockPlasmaTrackServer {
       ...this.summary(j),
       player: this.ref(j.owner),
       planned_distance_km: 62,
-      speed_penalty_applied: false,
+      speed_penalty_applied: j.speed_penalty === true,
       bonus: null,
       distance_by_scale_class: { city: { world_km: 2.81, world_mi: 1.75, game_km: 8.43, game_mi: 5.24 }, road: { world_km: 8.57, world_mi: 5.33, game_km: 117.27, game_mi: 72.87 }, one_to_one: zero, nonstandard: zero, unknown: zero },
-      public_notes: j.outcome === 'pending_review' ? [{ code: 'under_review', text: 'A moderator will check this job.' }] : [],
+      public_notes: this.divisionMod(j)
+        ? [{ code: 'discarded_singleplayer_division', text: `Discarded: a ${this.divisionMod(j)!.name} job by a Singleplayer Division player.` }]
+        : j.outcome === 'pending_review'
+          ? [{ code: 'under_review', text: 'A moderator will check this job.' }]
+          : [],
       custom_map: this.customMap(j, false),
       ...(j.origin === 'manual' ? { planned_distance_km: null } : {}),
     };

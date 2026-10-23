@@ -28,7 +28,7 @@
   },
   "config_version": {
     "current": true,
-    "integrity_hash": "37b16360fb88293742498e06351590d31df333882ff0cfd72e5852a71e689872",
+    "integrity_hash": "b55921e71d7c0268c39b287bfc22bc7dba8293f41357603f6bf41fd7328a6203",
     "version_id": "cfg_1"
   },
   "currency": "EUR",
@@ -138,6 +138,7 @@
   "income": 15000,
   "integrity": null,
   "job_id": "MHQGP65P",
+  "job_type": null,
   "market": null,
   "multiplayer": {
     "kind": "unknown",

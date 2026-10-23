@@ -14,13 +14,14 @@
         "company_id": "eolo_lines",
         "company_name": "Eolo Lines"
       },
-      "fuel_used_l": 0.71,
+      "fuel_used_l": 0.68,
       "game": "ets2",
       "game_km": 1.0,
       "game_mi": 0.62,
-      "held_points": null,
+      "held_points": 0.2,
       "income": 388,
       "job_id": "1XW08CFJ",
+      "job_type": "freight",
       "market": "quick_job",
       "multiplayer": {
         "kind": "truckersmp",
@@ -30,8 +31,8 @@
         }
       },
       "origin": "tracked",
-      "outcome": "valid",
-      "points": 0.2,
+      "outcome": "pending_review",
+      "points": null,
       "reported_delivered_at": "2026-10-14T01:29:53.859Z",
       "source": {
         "city_id": "cagliari",
@@ -56,13 +57,15 @@
         "company_id": "polarislines",
         "company_name": "Polaris Lines"
       },
-      "fuel_used_l": 0.0,
+      "fuel_readable": false,
+      "fuel_used_l": null,
       "game": "ets2",
       "game_km": 2512.0,
       "game_mi": 1560.88,
       "held_points": 90.3,
       "income": 99053,
       "job_id": "2RG8X3RX",
+      "job_type": "freight",
       "market": "cargo_market",
       "multiplayer": {
         "kind": "truckersmp",

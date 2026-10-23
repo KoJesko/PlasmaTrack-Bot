@@ -46,13 +46,15 @@
       "world_mi": 0.0
     }
   },
-  "fuel_used_l": 0.0,
+  "fuel_readable": false,
+  "fuel_used_l": null,
   "game": "ets2",
   "game_km": 2512.0,
   "game_mi": 1560.88,
   "held_points": 90.3,
   "income": 99053,
   "job_id": "2RG8X3RX",
+  "job_type": "freight",
   "market": "cargo_market",
   "multiplayer": {
     "kind": "truckersmp",

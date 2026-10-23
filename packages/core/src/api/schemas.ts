@@ -153,8 +153,16 @@ export const ORIGINS = ['tracked', 'manual'] as const;
 /** `manual`: submitted through the bot (PUBLIC_API §6). Missing means tracked. */
 const originSchema = openEnum(ORIGINS).optional();
 
+export const MULTIPLAYER_KINDS = ['singleplayer', 'truckersmp', 'convoy', 'unknown', 'haulmp', 'trucklinemp'] as const;
+
+/**
+ * `kind` may also be any multiplayer mod from the server config's
+ * `[[multiplayer.mods]]` (PUBLIC_API §3); for those, `name` is its display
+ * name (`HaulMP`). Show `name` when present, so a new mod needs no bot change.
+ */
 export const multiplayerSchema = obj({
-  kind: openEnum(['singleplayer', 'truckersmp', 'convoy', 'unknown']),
+  kind: openEnum(MULTIPLAYER_KINDS),
+  name: z.string().optional(),
   truckersmp: obj({ server_id: z.number().int().nullable().optional(), account_id: z.number().int().nullable().optional() })
     .nullable()
     .optional(),
@@ -180,6 +188,8 @@ export const jobSummarySchema = obj({
   origin: originSchema,
   /** Server 69fcfe9: null when unknown. `damage_pct` is cargo damage at delivery. */
   fuel_used_l: nullableNumber.optional(),
+  /** `false` (with `fuel_used_l: null`) when the readings are beyond any real tank; absent otherwise. */
+  fuel_readable: z.boolean().optional(),
   damage_pct: nullableNumber.optional(),
   /** Whole units of `currency` (EUR for ETS2, USD for ATS); a manual job's submitted profit. */
   income: nullableNumber.optional(),

@@ -180,6 +180,26 @@ export const editJobCommand: CommandDefinition = {
       },
       {
         type: ApplicationCommandOptionType.Subcommand,
+        name: 'speed-penalty',
+        description: 'Add or remove the speed penalty (the distance counts at 0.85×)',
+        options: [
+          JOB_ID_OPTION,
+          REASON_OPTION,
+          {
+            type: ApplicationCommandOptionType.String,
+            name: 'penalty',
+            description: 'Add it, remove it, or let the speed rules decide again',
+            required: true,
+            choices: [
+              { name: 'Add the speed penalty', value: 'add' },
+              { name: 'Remove the speed penalty', value: 'remove' },
+              { name: 'Automatic (the speed rules decide)', value: 'automatic' },
+            ],
+          },
+        ],
+      },
+      {
+        type: ApplicationCommandOptionType.Subcommand,
         name: 'clear',
         description: 'Remove values: damage, profit, fuel_used, truck, truck_model, mod_names, map_scale, uk…',
         options: [
@@ -230,6 +250,9 @@ export const editJobCommand: CommandDefinition = {
         if (section === undefined) problems.push('Give `section` (the number /review shows) with the adjusted-scale cities.');
         else changes.adjusted_scales = { [String(section - 1)]: { ...(adjEntry ? { entry_city: adjEntry } : {}), ...(adjExit ? { exit_city: adjExit } : {}) } };
       } else if (section !== undefined) problems.push('`section` goes with `adjusted_entry_city` or `adjusted_exit_city`.');
+    } else if (sub === 'speed-penalty') {
+      const penalty = stringOption(interaction, 'penalty');
+      changes.speed_penalty = penalty === 'add' ? true : penalty === 'remove' ? false : null;
     } else if (sub === 'clear') {
       for (const name of (stringOption(interaction, 'fields') ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) {
         const field = CLEARABLE[name];

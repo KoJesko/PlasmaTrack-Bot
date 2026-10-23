@@ -266,6 +266,32 @@ describe('/job', () => {
     const missing = await run(commandInteraction('job', { options: [opt('id', 'ZZZZZZZZ')] }));
     expect(missing.sent!.content).toBe('No job with ID ZZZZ-ZZZZ.');
   });
+
+  it('names a multiplayer mod by the server’s name, also one the bot doesn’t know, and its discard note', async () => {
+    const { run, server } = setup();
+    server.players.get(PLAYER_ID)!.singleplayer_division = true;
+    server.addJob({ job_id: 'HA71MP00', game: 'ets2', owner: PLAYER_ID, outcome: 'discarded', multiplayer: { kind: 'haulmp', name: 'HaulMP' } });
+    server.addJob({ job_id: 'NEW2MP00', game: 'ets2', owner: PLAYER_ID, outcome: 'valid', multiplayer: { kind: 'futuremp', name: 'FutureMP' } });
+    server.addJob({ job_id: 'TRK3MP00', game: 'ats', owner: PLAYER_ID, outcome: 'valid', multiplayer: { kind: 'trucklinemp' } });
+    server.addJob({ job_id: 'D0D4MP00', game: 'ats', owner: PLAYER_ID, outcome: 'valid', multiplayer: { kind: 'futuremp' } });
+    const field = async (id: string, name: string) =>
+      (await run(commandInteraction('job', { options: [opt('id', id)] }))).sent!.embeds![0]!.fields!.find((f) => f.name === name)?.value;
+    expect(await field('HA71MP00', 'Played')).toBe('HaulMP');
+    expect(await field('HA71MP00', 'Notes')).toBe('• Discarded: a HaulMP job by a Singleplayer Division player.');
+    expect(await field('NEW2MP00', 'Played')).toBe('FutureMP');
+    expect(await field('TRK3MP00', 'Played')).toBe('TrucklineMP');
+    expect(await field('D0D4MP00', 'Played')).toBeUndefined();
+    expect(await field('7K2M9QXA', 'Played')).toBe('Singleplayer');
+  });
+
+  it('says fuel is not readable rather than 0 L when the readings were beyond any tank', async () => {
+    const { run, server } = setup();
+    server.addJob({ job_id: 'F7E1X000', game: 'ets2', owner: PLAYER_ID, outcome: 'valid', fuel_readable: false });
+    const { sent } = await run(commandInteraction('job', { options: [opt('id', 'F7E1X000')] }));
+    expect(sent!.embeds![0]!.fields!.find((f) => f.name === 'Fuel used')?.value).toBe('not readable');
+    const normal = await run(commandInteraction('job', { options: [opt('id', '7K2M9QXA')] }));
+    expect(normal.sent!.embeds![0]!.fields!.find((f) => f.name === 'Fuel used')?.value).toBe('41.2 L');
+  });
 });
 
 describe('/jobs and /leaderboard', () => {

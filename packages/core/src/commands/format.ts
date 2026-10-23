@@ -1,4 +1,4 @@
-import type { Game, Outcome } from '../api/schemas.ts';
+import type { Game, JobSummary, Outcome } from '../api/schemas.ts';
 
 // Player-facing text. Distances and points are shown exactly as the server
 // sends them (server API_CONVENTIONS §6): the bot never converts or rounds.
@@ -31,6 +31,22 @@ export const OUTCOME_LABELS: Record<Outcome, string> = {
   voided: 'Voided',
   other: 'Unknown',
 };
+
+const MULTIPLAYER_LABELS: Record<string, string> = {
+  singleplayer: 'Singleplayer',
+  truckersmp: 'TruckersMP',
+  convoy: 'Convoy',
+  haulmp: 'HaulMP',
+  trucklinemp: 'TrucklineMP',
+};
+
+/** How the job was played. The server's `name` wins, so a new multiplayer mod shows without a bot change. Null when unknown. */
+export function multiplayerLabel(mp: JobSummary['multiplayer']): string | null {
+  if (!mp) return null;
+  const name = mp.name?.trim();
+  if (name) return escapeMarkdown(name.slice(0, 64));
+  return MULTIPLAYER_LABELS[mp.kind] ?? null;
+}
 
 /** Points as the server gave them; a job in review shows what it holds. */
 export function pointsText(outcome: Outcome, points: number | null, held: number | null | undefined): string {

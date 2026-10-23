@@ -52,13 +52,15 @@ Oldest first, with `total`. Each item:
 | `long_job` | Rule 3: loaded world distance over the threshold (150 km) | `world_km`, `threshold_world_km` |
 | `fast_average` | The whole job averaged over 5 1:1 km per real (unpaused) minute, i.e. 300 km/h | `world_km`, `driving_min`, `world_km_per_min` |
 | `fast_average_game` | The same, timed by the game's clock: in-game minutes turned back into real minutes at the map scale (singleplayer) or 6 per minute (TruckersMP) | `world_km`, `game_clock_min`, `world_km_per_min` |
-| `negative_fuel` | Rule 4: fuel used below −tolerance in a run | `run`, `used_l` |
+| `negative_fuel` | Rule 4: the tank gained more fuel in a run than its refuels explain (fuel used below −tolerance) | `run`, `used_l` |
 | `fuel_jump` | Rule 4: fuel rose outside a detected refuel | `at`, `litres` |
 | `gap` | Data missing mid-job (crash, client offline) | `count` |
 | `late_start` | Tracking began after the job was accepted | |
 | `cargo_switch` | Same route, different cargo mid-job (a save edit) | `from_cargo`, `to_cargo` |
 | `distance_mismatch` | The game's delivery distance disagrees with the trace | `delivered_km`, `tracked_km`, `tolerance_km` |
 | `no_delivered_distance` | The delivery carried no distance | |
+| `time_warp` | The game ran faster than real time: the `warp` console command. Any 30 s of real driving with game time over 1.15× real time (honest play stays within 1.05) | `max_factor`, `gained_s` (game seconds gained) |
+| `high_income` | The delivery paid more than `review_over_income_per_game_mi` (400) per mile of the game's delivery distance, or more than `review_over_income` (500,000) in all, in the game's currency. Every job, however short | `income`, `game_mi`, `per_game_mi`, `limit_per_game_mi`, `limit`, `currency` |
 | `trace_check` | Sample rate, sequence or `hello` inconsistency (PLAN §6a) | `checks[]` |
 | `odometer_jump`, `impossible_delivery_time` | Optional heuristics, off by default | rule specific |
 | `manual_submission` | Submitted by hand through the bot (PUBLIC_API §6): every manual job has it | |
@@ -70,6 +72,7 @@ Oldest first, with `total`. Each item:
 | `integrity` | Rule 0: config or install files match no published version | `config_matched`, `manifest_result` |
 | `negative_distance` | Rule 1 | |
 | `singleplayer_division_truckersmp` | A TruckersMP job by a Singleplayer Division player | |
+| `singleplayer_division_multiplayer_mod` | A job on a `[[multiplayer.mods]]` mod with `singleplayer_division_discard = true` (HaulMP, TrucklineMP), by a Singleplayer Division player | `kind`, `name` |
 
 **Invalid:** `outcome = invalid`. Its reason is `overspeed_invalid` (rule 2), with `peak_mph`,
 `over_invalid_s` and `invalid_over_mph`. A moderator may approve it, for example after falling
@@ -534,7 +537,7 @@ Corrects any field of **any** job, tracked or manual:
 - **Fields:** the same names as a manual submission (PUBLIC_API §6):
   - places, `cargo_name`, `truck`, `truck_model`, `mod_names`;
   - `distance`, `fuel_used`, `damage`, `profit`, `started_at`, `ended_at`;
-  - `map_scale`, `uk`, `adjusted_scales`, plus `bonus_id`.
+  - `map_scale`, `uk`, `adjusted_scales`, plus `bonus_id` and `speed_penalty`.
 - **Units and rules for fields:**
   - **Units:** `unit` is needed with any distance, `fuel_unit` with `fuel_used`.
   - **`uk`** may be partial (`{"uk": {"entry_city": "Dover"}}`), and `null` removes it.
@@ -570,7 +573,11 @@ Corrects any field of **any** job, tracked or manual:
     out the manual way (PUBLIC_API §6).
   - **`bonus_id`:** replaces the automatic bonus choice. It must be a bonus of the job's game,
     in any state.
-  - **The speed penalty** of a tracked job still applies.
+  - **`speed_penalty`** (owner, 2026-10-16): `true` adds the speed penalty (the distance counts at
+    `rules.speed_penalty_factor`, 0.85), `false` removes it, and `null` lets the rules decide
+    again. It works on tracked and manual jobs; players cannot set it. The admin detail's
+    `sheet.speed_penalty` shows what the rules decided, and `speed_penalty_applied` the result.
+  - **Otherwise the speed penalty** of a tracked job still applies.
 - **The outcome does not change.** A moderator decided outcome stays.
 - **Answer `200`:**
 
