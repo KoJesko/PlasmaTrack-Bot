@@ -96,6 +96,7 @@ Every non-2xx response has this body:
 | 409 | `idempotency_mismatch` | the key was reused with a different body |
 | 413 | `payload_too_large` | over the stated size limit (`details.max_bytes`) |
 | 422 | `validation_failed` | per-field problems: `details.fields = {"reason": "required"}` |
+| 426 | `client_too_old` | upload from a client below the server's minimum (`details.client_version`, `details.min_client_version`); it updates, then retries |
 | 429 | `rate_limited` | `Retry-After` header (seconds) and `details.retry_after_s` |
 | 500 / 503 | `internal` / `unavailable` | retry with backoff; `Retry-After` on 503 |
 
@@ -246,3 +247,27 @@ These answer the bot's open questions "(Q)". **The project owner confirmed all o
     `uninstaller` block.
   - **Clients** send their player token for updates (client 0.2.1).
   - **The revocation message** now points to `/download` in Discord.
+- 2026-10-15: fuel that changes across a teleport no longer raises `fuel_jump` or `negative_fuel`,
+  and is left out of `fuel_used_l`. World of Trucks event portals fill the tank.
+- 2026-10-15: the scorer works through large uploads in passes and never loses a job whose
+  data could not be written. It rebuilds once from raw data on deploy. Admin series of capture-mode
+  jobs no longer answer `404`.
+- 2026-10-15: a rebuild (a refresh, or a deploy) that takes several passes no longer stores jobs
+  part-way through: a delivered job no longer goes back to `tracking`, and sends no `job.scored`
+  for those steps, until the rebuild has caught up.
+- 2026-10-15: the `negative_fuel` reason text now reads "The tank gained fuel with no refuel seen."
+  The old text described the opposite of what the check finds.
+- 2026-10-16: new review reason `time_warp` (details `max_factor`, `gained_s`): the game ran faster
+  than real time, the `warp` console command. It follows `review_policy.trace_checks`.
+- 2026-10-16: ATS road trips (`car_job`) are tracked and scored like freight. Jobs carry
+  `job_type` (`freight` or `car`); a road trip's `market` comes from `car_job.market`. Every scorer
+  rebuilds once from raw data, so past road trips appear.
+- 2026-10-16: road trips have their own ATS speed limits, `[rules.speed.ats.road_trip]` (penalty over
+  155 mph, invalid over 200 mph), in config version 2.
+- 2026-10-16: moderators add or remove the speed penalty with `speed_penalty` (`true`, `false`,
+  `null` for the rules) in `PATCH /api/v1/admin/jobs/{job_id}` and approval corrections. The
+  speed-penalty and invalid-delivery notifications quote a road trip's own limits.
+- 2026-10-16: new review reason `high_income`: over 400 per mile of the game's delivery distance, or
+  over 500,000 in all (config version 3, `review_over_income_per_game_mi` and `review_over_income`).
+- 2026-10-16: uploads from clients below `MIN_CLIENT_VERSION` (0.2.4) are refused with
+  `426 client_too_old`; the client keeps the data and retries after updating.

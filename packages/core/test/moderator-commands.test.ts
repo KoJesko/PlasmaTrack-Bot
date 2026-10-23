@@ -133,6 +133,19 @@ describe('/review', () => {
     expect(server.jobs.get('R3VW5T6Y')!.outcome).toBe('pending_review');
   });
 
+  it('shows the multiplayer mod and its Singleplayer Division discard reason; unreadable fuel says so', async () => {
+    const { run, server } = setup();
+    server.players.get(PLAYER_ID)!.singleplayer_division = true;
+    server.addJob({ job_id: 'HA71MP00', game: 'ets2', owner: PLAYER_ID, outcome: 'discarded', multiplayer: { kind: 'haulmp', name: 'HaulMP' }, fuel_readable: false });
+    const view = await run(commandInteraction('review', mod({ options: [sub('job', [opt('id', 'HA71MP00')])] })));
+    const field = (n: string) => view.sent!.embeds![0]!.fields!.find((f) => f.name === n)?.value;
+    expect(field('Played')).toBe('HaulMP');
+    expect(field('Review reasons')).toContain('`singleplayer_division_multiplayer_mod`');
+    expect(field('Review reasons')).toContain('A HaulMP job by a Singleplayer Division player.');
+    expect(field('Review reasons')).toContain('haulmp');
+    expect(field('Fuel')).toBe('not readable (beyond any tank)');
+  });
+
   it('a voided job only offers Restore', async () => {
     const { run, server } = setup();
     server.addJob({ job_id: 'V01DED00', game: 'ats', owner: PLAYER_ID, outcome: 'voided', before_void: 'valid' });

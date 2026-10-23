@@ -7,7 +7,7 @@ import { MAP_CREDIT_LINE } from '../../credits.ts';
 import { ApplicationCommandOptionType, ButtonStyle, ComponentType } from '../../discord/constants.ts';
 import type { OutgoingFile } from '../../discord/rest.ts';
 import type { CommandDefinition, ComponentDefinition, ModalDefinition, TaskDefinition, TaskDeps } from '../../interactions/types.ts';
-import { discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, OUTCOME_LABELS, pointsText } from '../format.ts';
+import { discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, multiplayerLabel, OUTCOME_LABELS, pointsText } from '../format.ts';
 import { stringOption, subcommand } from '../options.ts';
 import { evidenceImages } from '../submit.ts';
 import { jobCharts } from '../charts.ts';
@@ -249,6 +249,8 @@ export function jobEmbed(job: AdminJobDetail): APIEmbed {
       inline: true,
     },
   ];
+  const mode = multiplayerLabel(job.multiplayer);
+  if (mode) fields.push({ name: 'Played', value: mode, inline: true });
   if (job.reasons.length > 0) {
     fields.push({
       name: 'Review reasons',
@@ -269,6 +271,8 @@ export function jobEmbed(job: AdminJobDetail): APIEmbed {
   if (num(fuel['used_l']) !== null) {
     const refuels = Array.isArray(fuel['refuels']) ? fuel['refuels'].length : 0;
     fields.push({ name: 'Fuel', value: `${num(fuel['used_l'])} L used${refuels ? ` · ${refuels} refuel${refuels === 1 ? '' : 's'}` : ''}`, inline: true });
+  } else if (job.fuel_readable === false) {
+    fields.push({ name: 'Fuel', value: 'not readable (beyond any tank)', inline: true });
   }
   const integrity = job.integrity ?? {};
   const failedChecks = Array.isArray(integrity['trace_checks'])

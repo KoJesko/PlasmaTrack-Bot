@@ -138,6 +138,7 @@ comma-separated outcomes. Each item is a **job summary**:
   "source": {"city_id": "dover", "city_name": "Dover", "company_id": "euroacres", "company_name": "EuroAcres"},
   "destination": {"city_id": "calais", "city_name": "Calais", "company_id": "lkwlog", "company_name": "LKW Log"},
   "market": "cargo_market",
+  "job_type": "freight",
   "delivered_at": "2026-10-13T21:25:03.512Z",
   "reported_delivered_at": "2026-10-13T21:25:00.070Z",
   "multiplayer": {"kind": "truckersmp", "truckersmp": {"server_id": 4, "account_id": 1234567}},
@@ -148,7 +149,13 @@ comma-separated outcomes. Each item is a **job summary**:
 **Fuel, damage and income** (public, like distance and points; owner, 2026-10-15). Each is
 `null` when unknown:
 
-- **`fuel_used_l`:** litres used on the job; the bot converts to gallons for ATS.
+- **`fuel_used_l`:** litres used on the job; the bot converts to gallons for ATS. `null` when
+  unknown (manual jobs), or when the fuel readings are beyond any real tank (over 100,000 L),
+  typically a save edit that filled the tank far past full (600 L × 99,999 = 59,999,400 L).
+  The SDK sends fuel as a 32-bit float, which at that size only changes in 4 L steps, so the
+  fuel burned never shows. Such a job also has **`fuel_readable: false`** (absent otherwise).
+  The telemetry SDK has no channel for an electric truck's battery, so there is no kWh figure
+  for electric trucks either.
 - **`damage_pct`:** **cargo** damage at delivery, 0–100. The tracker doesn't record truck wear, so
   a manual job's `damage` means cargo damage too.
 - **`income`:** whole units of `currency` (`EUR` for ETS2, `USD` for ATS).
@@ -167,14 +174,19 @@ comma-separated outcomes. Each item is a **job summary**:
   `pending_review`.
 - **`world_*`** is the scored 1:1 distance. **`game_*`** is the in-game distance of the same
   scored part. Both are 0 for `discarded`.
-- **`multiplayer.kind`** is `singleplayer`, `truckersmp` or `convoy`. `truckersmp` is `null`
-  unless the kind is `truckersmp`.
+- **`multiplayer.kind`** is `singleplayer`, `truckersmp`, `convoy`, or the `kind` of a multiplayer
+  mod listed in the config's `[[multiplayer.mods]]` (today `haulmp` and `trucklinemp`). For a mod,
+  `multiplayer.name` is its display name (`HaulMP`, `TrucklineMP`); other kinds have no `name`. `truckersmp` is `null` unless the
+  kind is `truckersmp`.
 - **`delivered_at`** is the **server's** clock when the delivery reached it. Leaderboard periods
   and bonus windows use it, so a player's PC clock cannot move a job into another period.
   **`reported_delivered_at`** is the player's PC clock at the delivery, for display only. They
   differ by the upload delay, which can be hours if the client was offline.
 - **`market`** is the game's `job.market`, for example `cargo_market`, `freight_market`,
-  `quick_job` or `external_contracts` (World of Trucks). `null` for a manual job.
+  `quick_job` or `external_contracts` (World of Trucks). `null` for a manual job. A road trip
+  carries its own market (`car_job.market`), for example `dispatch_job`.
+- **`job_type`** is `freight` (a truck job) or `car` (an ATS road trip in a car or pickup, scored
+  the same way). `null` for a manual job, and for jobs scored before 2026-10-16 until re-scored.
 - **`origin`** is `tracked` (recorded by the tracker) or `manual` (submitted through the bot,
   §6). A manual job has:
   - `cargo.id`, `city_id` and `company_id` set to `null`, because only names were typed;
@@ -248,7 +260,8 @@ The job summary plus:
   - `invalid_overspeed`: sustained speed over the invalid limit;
   - `discarded_integrity`: the tracker's files or settings were not recognised (rule 0);
   - `discarded_negative_distance`;
-  - `discarded_singleplayer_division`: a TruckersMP job by a Singleplayer Division player;
+  - `discarded_singleplayer_division`: a TruckersMP job by a Singleplayer Division player, or a
+    job on a multiplayer mod the division leaves out (HaulMP, TrucklineMP; the text names the mod);
   - `rejected`: rejected by a moderator. The moderator's reason is admin-only;
   - `voided`: voided by a moderator.
 
@@ -267,7 +280,7 @@ The job summary plus:
   "type": "FeatureCollection",
   "bbox": [1.17, 50.95, 1.86, 51.13],
   "properties": {"job_id": "7K2M9QXA", "game": "ets2", "vertex_count": 1843, "max_vertices": 5000,
-                 "simplification_tolerance_world_m": 5.0, "includes_reverted": false},
+                 "simplification_tolerance_world_m": 5.0, "includes_reverted": false, "projection": "basemap"},
   "features": [
     {"type": "Feature",
      "geometry": {"type": "LineString", "coordinates": [[1.3133, 51.1268], [1.3141, 51.1262]]},
@@ -294,6 +307,11 @@ The job summary plus:
     `world_km` are the odometer difference across the gap, when there is one.
 
   The renderer should draw the non-driving kinds differently, for example dashed.
+- **`properties.projection`** is `basemap` (lines up with the game's basemap tiles) or `local`:
+  the route left the basemap projection's range (a 1:1 map mod, whose real-size distances
+  wrap around the globe at the vanilla map's scale), so it is drawn flat in game metres,
+  1° = 111.32 km, centred on 0°, 0°, where no basemap tiles are. Every coordinate is always a
+  valid longitude and latitude.
 - **`counted`:** whether this stretch earned distance (loaded and hitched; any job driving for
   World of Trucks). The empty drive to the pickup is `false`.
 - **`scale_class`:** `city`, `road`, `one_to_one`, `nonstandard` or `unknown`.

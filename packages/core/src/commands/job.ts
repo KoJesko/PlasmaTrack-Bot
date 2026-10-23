@@ -9,19 +9,13 @@ import { ApplicationCommandOptionType, MessageFlags } from '../discord/constants
 import type { OutgoingFile } from '../discord/rest.ts';
 import type { CommandDefinition, TaskDefinition, TaskDeps } from '../interactions/types.ts';
 import { SCALE_CLASS_LABELS, SCALE_CLASSES } from '../render/protocol.ts';
-import { discordTime, distance, escapeMarkdown, GAME_SHORT, OUTCOME_LABELS, pointsText } from './format.ts';
+import { discordTime, distance, escapeMarkdown, GAME_SHORT, multiplayerLabel, OUTCOME_LABELS, pointsText } from './format.ts';
 import { MAX_EVIDENCE_BYTES, money } from './manual-fields.ts';
 import { booleanOption, PRIVATE_OPTION, stringOption } from './options.ts';
 import { evidenceButton } from './submit.ts';
 import { sniffImageType } from '../media.ts';
 
 export const JOB_TASK = 'job.show';
-
-const MULTIPLAYER_LABELS: Record<string, string> = {
-  singleplayer: 'Singleplayer',
-  truckersmp: 'TruckersMP',
-  convoy: 'Convoy',
-};
 
 const OUTCOME_COLORS: Record<string, number> = {
   valid: 0x2e9e5b,
@@ -113,7 +107,7 @@ export function jobEmbed(job: JobDetail): APIEmbed {
     { name: 'In game', value: distance(job.game_mi, job.game_km), inline: true },
     { name: 'Delivered', value: discordTime(job.delivered_at, 'f'), inline: true },
   ];
-  const mode = job.multiplayer ? MULTIPLAYER_LABELS[job.multiplayer.kind] : undefined;
+  const mode = multiplayerLabel(job.multiplayer);
   if (mode) fields.push({ name: 'Played', value: mode, inline: true });
   if (job.bonus) {
     const amount = job.bonus.kind === 'multiplier' ? `×${job.bonus.amount}` : `+${job.bonus.amount} points`;
@@ -124,6 +118,9 @@ export function jobEmbed(job: JobDetail): APIEmbed {
   if (typeof job.fuel_used_l === 'number') {
     const gal = Math.round((job.fuel_used_l / 3.785411784) * 100) / 100;
     fields.push({ name: 'Fuel used', value: job.game === 'ats' ? `${gal} gal (${job.fuel_used_l} L)` : `${job.fuel_used_l} L`, inline: true });
+  } else if (job.fuel_readable === false) {
+    // Server PR #6: readings beyond any tank (a save edit); the fuel burned can't be told.
+    fields.push({ name: 'Fuel used', value: 'not readable', inline: true });
   }
   if (typeof job.damage_pct === 'number') fields.push({ name: 'Cargo damage', value: `${job.damage_pct}%`, inline: true });
   if (typeof job.income === 'number') fields.push({ name: 'Income', value: money(job.income, job.game), inline: true });
