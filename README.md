@@ -31,7 +31,7 @@ PlasmaTrack server ──webhooks──▶  │  answers within 3 s (Discord)   
 | `packages/renderer` | Node service that draws route maps (PMTiles + MapLibre Native) and speed/fuel charts (SVG via resvg), and shrinks evidence images to AVIF (sharp). Runs as a Cloudflare Container behind the Worker (no public address), or on any host with Node 24. |
 
 Key behaviour:
-- **Discord's 3-second deadline.** Command handlers are synchronous and get no I/O, so the first response is always immediate. Anything that needs I/O replies "thinking…" and runs from the queue.
+- **Discord's 3-second deadline.** Command handlers are synchronous and get no I/O, so the first response is always immediate. Anything that needs I/O replies "thinking…" and then runs in the same request, right after the reply (the queue can take seconds to deliver). A command that needs a retry, crashes or runs over 20 s goes to the queue and is retried from there.
 - **Access:** commands work only in the configured Discord servers, never in DMs. Every command except `/about` needs one of that server's member or moderator roles, checked on every use. Moderator commands need a moderator role, and the PlasmaTrack server must also list the person as an admin.
 - **One backend per Discord server:** each server is mapped to its own PlasmaTrack server (production, test…), so a test server never sees production data. Webhooks tell backends apart by their signing secret; notices, dedupe and job versions are kept per backend.
 - **Player tokens** are only ever shown ephemerally. They are never logged, queued or stored.

@@ -58,8 +58,8 @@ weeks. Restoring: OPERATIONS.md, "Restore a backup".
 ## Queue (`plasmatrack-work`)
 
 Deferred work waits here for seconds, or minutes when retrying:
-- commands that need the server, the renderer or a DM, with the Discord interaction token
-  needed to edit the reply;
+- commands that need a retry (they run straight after their first reply otherwise), with the
+  Discord interaction token needed to edit the reply;
 - verified server webhooks;
 - DMs to send.
 

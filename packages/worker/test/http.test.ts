@@ -1,5 +1,5 @@
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
 import { command, envWithRecordingQueue, INTERACTION_TOKEN, notificationEvent, signedRequest, signedWebhook, USER_A } from './helpers.ts';
@@ -9,6 +9,15 @@ async function call(request: Request, testEnv: Env = env) {
   const response = await worker.fetch(request as Request<unknown, IncomingRequestCfProperties>, testEnv, ctx);
   await waitOnExecutionContext(ctx);
   return response;
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+/** Discord as seen by commands that run right after their reply. */
+function fakeDiscord() {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ id: 'msg' }));
 }
 
 describe('HTTP entry point', () => {
@@ -29,38 +38,46 @@ describe('HTTP entry point', () => {
     expect(await res.json()).toEqual({ type: 1 });
   });
 
-  it('answers /about immediately and queues the notice hint after responding', async () => {
+  it('answers /about immediately and checks for notices after responding, without the queue', async () => {
+    fakeDiscord();
     const { testEnv, sent } = envWithRecordingQueue();
     const res = await call(await signedRequest(command('about')), testEnv);
     const body = (await res.json()) as { type: number; data: { flags: number } };
     expect(body.type).toBe(4);
     expect(body.data.flags & 64).toBe(64);
-    expect(sent).toEqual([expect.objectContaining({ type: 'notice-hint' })]);
+    expect(sent).toEqual([]);
   });
 
-  it('defers /notices ephemerally and enqueues the task', async () => {
+  it('defers /notices ephemerally, then runs it right away and edits the reply, without the queue', async () => {
+    const discord = fakeDiscord();
     const { testEnv, sent } = envWithRecordingQueue();
     const res = await call(await signedRequest(command('notices')), testEnv);
     expect(await res.json()).toEqual({ type: 5, data: { flags: 64 } });
-    expect(sent).toEqual([
-      expect.objectContaining({
-        type: 'interaction-task',
-        task: { name: 'notices.list', input: null },
-        interaction: expect.objectContaining({ userId: USER_A, token: INTERACTION_TOKEN }),
-      }),
-    ]);
+    expect(sent).toEqual([]);
+    const urls = discord.mock.calls.map((c) => String(c[0]));
+    expect(urls).toContain(`https://discord.com/api/v10/webhooks/100000000000000001/${INTERACTION_TOKEN}/messages/@original`);
+  });
+
+  it('hands a command to the queue when it needs a retry', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ message: 'rate limited', retry_after: 2 }, { status: 429 }));
+    const { testEnv, sent } = envWithRecordingQueue();
+    const res = await call(await signedRequest(command('notices', { user: USER_A })), testEnv);
+    expect(await res.json()).toEqual({ type: 5, data: { flags: 64 } });
+    expect(sent).toEqual([expect.objectContaining({ type: 'interaction-task', task: { name: 'notices.list', input: null } })]);
   });
 
   it('allows 5 slash commands per user per 20 s, counted in D1', async () => {
-    const { testEnv, sent } = envWithRecordingQueue();
+    fakeDiscord();
+    const { testEnv } = envWithRecordingQueue();
     const user = '700000000000000077';
     const replies: { type: number; data?: { content?: string } }[] = [];
     for (let i = 0; i < 6; i++) replies.push(await (await call(await signedRequest(command('notices', { user })), testEnv)).json());
     // Unless the 20 s window happened to roll over mid-test, the sixth is refused.
     const refused = replies.filter((r) => r.data?.content?.includes('going a bit fast'));
+    const started = replies.filter((r) => r.type === 5);
     expect(refused.length).toBeLessThanOrEqual(1);
-    expect(sent.length + refused.length).toBe(6);
-    expect(sent.length).toBeGreaterThanOrEqual(5);
+    expect(started.length + refused.length).toBe(6);
+    expect(started.length).toBeGreaterThanOrEqual(5);
   });
 
   it('refuses commands in DMs and from members without a PlasmaTrack role', async () => {
