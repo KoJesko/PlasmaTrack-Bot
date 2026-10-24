@@ -8,6 +8,7 @@ import {
   handleInteraction,
   handlers,
   HttpMediaFetcher,
+  InlineTaskQueue,
   MessageFlags,
   parseBotConfig,
   PlasmaTrackApi,
@@ -25,6 +26,7 @@ import {
   withReference,
   type BotConfig,
   type ConsumerDeps,
+  type InteractionRef,
   type Logger,
   type QueueMessage,
 } from '@plasmatrack/core';
@@ -180,7 +182,25 @@ async function handleInteractionRequest(request: Request, env: Env, ctx: Executi
     return new Response('bad request', { status: 400 });
   }
 
-  const queue = new CloudflareWorkQueue(env.WORK_QUEUE);
+  const workQueue = new CloudflareWorkQueue<QueueMessage>(env.WORK_QUEUE);
+  const discord = new DiscordRest({ applicationId: rt.config.DISCORD_APPLICATION_ID, botToken: rt.config.DISCORD_BOT_TOKEN });
+  const startFailed = (ref: InteractionRef, kind: 'defer' | 'defer-update') => {
+    const message = { content: withReference(START_FAILED, ref.id), flags: MessageFlags.Ephemeral, allowed_mentions: { parse: [] } };
+    // A command's "thinking…" reply becomes the error; a button's message stays as it was.
+    return kind === 'defer' ? discord.editOriginal(ref.token, message) : discord.followup(ref.token, message);
+  };
+  // Commands run here, right after the first response; the queue is their fallback.
+  const queue = new InlineTaskQueue({
+    queue: workQueue,
+    waitUntil: (work) => ctx.waitUntil(work),
+    run: (message) => processQueueMessage(message, tasks, consumerDeps(env, rt), { attempt: 1, maxAttempts: MAX_RETRIES + 1 }),
+    logger: rt.logger,
+    // Command or button is no longer known here: a private follow-up suits both
+    // (after a deferred command it takes the place of "thinking…").
+    onLost: async (message) => {
+      if (message.type === 'interaction-task') await startFailed(message.interaction, 'defer-update');
+    },
+  });
   const { response, background, after } = await handleInteraction(interaction, {
     handlers,
     applicationId: rt.config.DISCORD_APPLICATION_ID,
@@ -190,10 +210,7 @@ async function handleInteractionRequest(request: Request, env: Env, ctx: Executi
     clock: systemClock,
     limiter: new D1RateLimiter(env.DB, COMMAND_LIMIT, COMMAND_WINDOW_MS),
     reportStartFailure: async (ref, kind) => {
-      const discord = new DiscordRest({ applicationId: rt.config.DISCORD_APPLICATION_ID, botToken: rt.config.DISCORD_BOT_TOKEN });
-      const message = { content: withReference(START_FAILED, ref.id), flags: MessageFlags.Ephemeral, allowed_mentions: { parse: [] } };
-      // A command's "thinking…" reply becomes the error; a button's message stays as it was.
-      await (kind === 'defer' ? discord.editOriginal(ref.token, message) : discord.followup(ref.token, message));
+      await startFailed(ref, kind);
     },
   });
   if (after) ctx.waitUntil(after);

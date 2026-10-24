@@ -56,7 +56,8 @@ bucket_name = "plasmatrack-backups"
 # tag = "renderer-v1"
 # new_sqlite_classes = ["RendererContainer"]
 
-# Deferred work: everything slower than Discord's 3-second window.
+# Deferred work: webhooks, DMs, and commands that need a retry. Commands first run
+# straight after their "thinking…" reply (InlineTaskQueue); the queue is their fallback.
 [[queues.producers]]
 binding = "WORK_QUEUE"
 queue = "plasmatrack-work"

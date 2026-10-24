@@ -10,6 +10,7 @@ export * from './discord/rest.ts';
 export * from './interactions/types.ts';
 export * from './interactions/router.ts';
 export * from './interactions/tasks.ts';
+export * from './interactions/inline.ts';
 export * from './commands/registration.ts';
 export * from './render/protocol.ts';
 export * from './render/client.ts';

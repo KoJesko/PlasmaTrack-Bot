@@ -28,6 +28,8 @@ every log line about that command carries it as `interactionId`. Search the Work
 | `message dead-lettered` | A queued message used up its retries. Only its kind and IDs are logged. |
 | `rate limited` | The user sent more than 5 slash commands in 20 seconds. |
 | `interaction token expired before the task ran` | The queue was badly backed up. |
+| `task over its inline budget; handed to the queue` | A command ran over 20 s after its reply (usually a cold renderer), so the queue runs it again. |
+| `retry could not be queued` | A command needed a retry but the queue refused it; the user was told to try again. |
 
 ## Connect, or switch, a PlasmaTrack server
 
