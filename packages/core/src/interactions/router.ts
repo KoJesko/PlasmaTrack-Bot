@@ -29,8 +29,13 @@ export interface RouterDeps {
   queue: WorkQueue<QueueMessage>;
   logger: Logger;
   clock: Clock;
-  /** Upper bound on the enqueue in the response path. Keeps us inside Discord's 3 s. */
+  /**
+   * How long the response waits for the enqueue. A slower enqueue doesn't fail the
+   * command: the deferred response goes out and the enqueue finishes in `after`.
+   */
   enqueueTimeoutMs?: number;
+  /** Tells the user a command could not be started after its deferred response went out. */
+  reportStartFailure?: (interaction: InteractionRef, kind: 'defer' | 'defer-update') => Promise<void>;
   /** Per-user budget for slash commands (all users; buttons and forms don't count). */
   limiter?: RateLimiter;
   /** Upper bound on the limiter check; when it is slow or down, the user goes ahead. */
@@ -41,6 +46,8 @@ export interface RouterResult {
   response: APIInteractionResponse;
   /** Work to enqueue after the response is sent (never awaited before responding). */
   background: QueueMessage[];
+  /** A slow enqueue still in flight when the response went out; keep the Worker alive for it. */
+  after?: Promise<void>;
 }
 
 export const NOT_ALLOWED = 'You need a moderator role to use this.';
@@ -159,11 +166,27 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
     case 'defer':
     case 'defer-update': {
       const message: QueueMessage = { type: 'interaction-task', task: result.task, interaction: ref, noticeHint: isCommand && inGuild };
+      const log = { task: result.task.name, interactionId: interaction.id };
+      // Queue sends are usually fast but sometimes take seconds. Waiting past Discord's
+      // 3 s would lose the command, so a slow send carries on after the response.
+      const sending = deps.queue.send(message);
+      let after: Promise<void> | undefined;
       try {
-        await withTimeout(deps.queue.send(message), deps.enqueueTimeoutMs ?? 2000);
+        await withTimeout(sending, deps.enqueueTimeoutMs ?? 1000);
       } catch (err) {
-        deps.logger.error('enqueue failed', { err, task: result.task.name, interactionId: interaction.id });
-        return reply(ephemeralText(withReference(START_FAILED, interaction.id)));
+        if (!(err instanceof EnqueueTimeout)) {
+          deps.logger.error('enqueue failed', { ...log, err });
+          return reply(ephemeralText(withReference(START_FAILED, interaction.id)));
+        }
+        deps.logger.warn('enqueue slow; answering first', log);
+        const kind = result.kind;
+        after = sending
+          .catch(() => deps.queue.send(message))
+          .catch(async (err: unknown) => {
+            deps.logger.error('enqueue failed', { ...log, err });
+            await deps.reportStartFailure?.(ref, kind);
+          })
+          .catch((err: unknown) => deps.logger.error('start failure not reported', { ...log, err }));
       }
       const response: APIInteractionResponse =
         result.kind === 'defer'
@@ -172,7 +195,7 @@ export async function handleInteraction(interaction: APIInteraction, deps: Route
               data: result.ephemeral ? { flags: MessageFlags.Ephemeral } : {},
             }
           : { type: InteractionResponseType.DeferredMessageUpdate };
-      return { response, background: [] };
+      return { response, background: [], ...(after ? { after } : {}) };
     }
   }
 }
@@ -211,10 +234,12 @@ function reply(message: OutgoingMessage): RouterResult {
   };
 }
 
+class EnqueueTimeout extends Error {}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
+    timer = setTimeout(() => reject(new EnqueueTimeout(`timed out after ${ms} ms`)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

@@ -123,15 +123,54 @@ describe('handleInteraction', () => {
       }
     });
 
+    it('a slow queue still gets the deferred answer in time, and the task is enqueued after it', async () => {
+      vi.useFakeTimers();
+      let finish!: () => void;
+      const sent: QueueMessage[] = [];
+      const slow: WorkQueue<QueueMessage> = {
+        send: (m) => new Promise<void>((ok) => (finish = () => (sent.push(m), ok()))),
+        sendBatch: () => Promise.resolve(),
+      };
+      const reported: string[] = [];
+      const { deps } = routerDeps({ queue: slow, enqueueTimeoutMs: 1000, reportStartFailure: async (_ref, kind) => void reported.push(kind) });
+      const pending = handleInteraction(commandInteraction('leaderboard', { options: [{ name: 'game', type: 3, value: 'ets2' }] }), deps);
+      await vi.advanceTimersByTimeAsync(1000);
+      const r = await pending;
+      expect(r.response.type).toBe(InteractionResponseType.DeferredChannelMessageWithSource);
+      expect(r.after).toBeDefined();
+      finish();
+      await r.after;
+      expect(sent).toHaveLength(1);
+      expect(reported).toEqual([]);
+    });
+
+    it('a slow send that then fails is retried once, then the user is told', async () => {
+      vi.useFakeTimers();
+      let attempts = 0;
+      const rejects: WorkQueue<QueueMessage> = {
+        send: () => (++attempts === 1 ? new Promise<void>((_, no) => setTimeout(() => no(new Error('queue down')), 1500)) : Promise.reject(new Error('queue down'))),
+        sendBatch: () => Promise.resolve(),
+      };
+      const reported: string[] = [];
+      const { deps } = routerDeps({ queue: rejects, enqueueTimeoutMs: 1000, reportStartFailure: async (_ref, kind) => void reported.push(kind) });
+      const pending = handleInteraction(commandInteraction('notices'), deps);
+      await vi.advanceTimersByTimeAsync(1000);
+      const r = await pending;
+      expect(r.response.type).toBe(InteractionResponseType.DeferredChannelMessageWithSource);
+      await vi.advanceTimersByTimeAsync(600);
+      await r.after;
+      expect(attempts).toBe(2);
+      expect(reported).toEqual(['defer']);
+    });
+
     it('a stalled queue still gets an answer before the deadline', async () => {
       vi.useFakeTimers();
       const stalled: WorkQueue<QueueMessage> = { send: () => new Promise(() => {}), sendBatch: () => new Promise(() => {}) };
-      const { deps } = routerDeps({ queue: stalled, enqueueTimeoutMs: 2000 });
+      const { deps } = routerDeps({ queue: stalled });
       const pending = handleInteraction(commandInteraction('notices'), deps);
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(1000);
       const r = await pending;
-      expect(r.response.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect((r.response as { data: { content: string } }).data.content).toBe(withReference(START_FAILED, commandInteraction('notices').id));
+      expect(r.response.type).toBe(InteractionResponseType.DeferredChannelMessageWithSource);
     });
 
     it('a failing queue is reported to the user ephemerally', async () => {
