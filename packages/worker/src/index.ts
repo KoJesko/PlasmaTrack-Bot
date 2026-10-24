@@ -8,11 +8,13 @@ import {
   handleInteraction,
   handlers,
   HttpMediaFetcher,
+  MessageFlags,
   parseBotConfig,
   PlasmaTrackApi,
   processQueueMessage,
   receiveWebhook,
   secretValues,
+  START_FAILED,
   systemClock,
   tasks,
   TruckersMpClient,
@@ -20,6 +22,7 @@ import {
   WEBHOOK_EVENT_ID_HEADER,
   WEBHOOK_MAX_BYTES,
   WEBHOOK_SIGNATURE_HEADER,
+  withReference,
   type BotConfig,
   type ConsumerDeps,
   type Logger,
@@ -178,7 +181,7 @@ async function handleInteractionRequest(request: Request, env: Env, ctx: Executi
   }
 
   const queue = new CloudflareWorkQueue(env.WORK_QUEUE);
-  const { response, background } = await handleInteraction(interaction, {
+  const { response, background, after } = await handleInteraction(interaction, {
     handlers,
     applicationId: rt.config.DISCORD_APPLICATION_ID,
     guilds: rt.config.GUILDS,
@@ -186,7 +189,14 @@ async function handleInteractionRequest(request: Request, env: Env, ctx: Executi
     logger: rt.logger,
     clock: systemClock,
     limiter: new D1RateLimiter(env.DB, COMMAND_LIMIT, COMMAND_WINDOW_MS),
+    reportStartFailure: async (ref, kind) => {
+      const discord = new DiscordRest({ applicationId: rt.config.DISCORD_APPLICATION_ID, botToken: rt.config.DISCORD_BOT_TOKEN });
+      const message = { content: withReference(START_FAILED, ref.id), flags: MessageFlags.Ephemeral, allowed_mentions: { parse: [] } };
+      // A command's "thinking…" reply becomes the error; a button's message stays as it was.
+      await (kind === 'defer' ? discord.editOriginal(ref.token, message) : discord.followup(ref.token, message));
+    },
   });
+  if (after) ctx.waitUntil(after);
   if (background.length > 0) {
     ctx.waitUntil(
       Promise.all(background.map((m) => queue.send(m))).catch((err) =>
