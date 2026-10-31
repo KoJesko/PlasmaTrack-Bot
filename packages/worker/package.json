@@ -13,11 +13,11 @@
     "build": "wrangler deploy --dry-run --outdir dist --config wrangler.test.toml"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.4.1",
+    "@cloudflare/vitest-plugin": "^1.4.11",
     "@cloudflare/workers-types": "^5.20260928.1",
     "@types/node": "^26.6.3",
     "vitest": "^4.1.12",
-    "wrangler": "^4.150.0"
+    "wrangler": "^4.156.0"
   },
   "dependencies": {
     "@plasmatrack/core": "^0.1.0",
