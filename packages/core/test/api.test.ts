@@ -57,6 +57,18 @@ describe('API client: requests', () => {
     expect(adm!.headers['x-plasmatrack-actor']).toBe(ADMIN_ID);
   });
 
+  it('keeps typed IDs inside their path segment', async () => {
+    const { server, admin } = setup();
+    await failure(admin.operation('x/../../players/1/token?y=#z'));
+    expect(server.calls.at(-1)!.path).toBe('/api/v1/admin/operations/x%2F..%2F..%2Fplayers%2F1%2Ftoken%3Fy%3D%23z');
+    const before = server.calls.length;
+    for (const bad of ['..', '.']) {
+      expect((await failure(admin.operation(bad))).status).toBe(404);
+      expect((await failure(admin.cancelRevocation(bad, { reason: 'test reason', idempotencyKey: 'k' }))).status).toBe(404);
+    }
+    expect(server.calls.length).toBe(before);
+  });
+
   it('sends Idempotency-Key and the trimmed reason on admin writes', async () => {
     const { server, admin } = setup();
     await admin.decide('R3VW5T6Y', 'approve', { reason: '  Checked the route.  ', idempotencyKey: 'i-1:approve' });
