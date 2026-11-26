@@ -25,7 +25,7 @@ don't count. Past the limit, the bot asks you to wait a few seconds.
 | `/name name:` | private | The name shown for you on leaderboards (2–32 characters). |
 | `/notices` | private | Messages the bot couldn't DM you (for example, if your DMs are closed): invalid deliveries, speed penalties, revocation notices, and "Get your token" buttons from moderators. |
 | `/profile [user]` | public | A player's points, jobs and distance per game, plus the TruckersMP accounts the tracker saw. An account is marked *confirmed* only when its TruckersMP profile shows the same Discord account. Unconfirmed accounts are only shown to the player themselves, with `private: True`. |
-| `/job id:` | public | One job: outcome, points, distance by map scale, bonus, notes, and the route map. Job IDs look like `7K2M-9QXA`. |
+| `/job id:` | public | One job: outcome, points, distance by map scale, bonus, notes, and the route map. Job IDs look like `7K2M-9QXA`. A coach job (ETS2 Coaches DLC) shows as a **Coach line** or **Tourist trip** from its first to its last stop ("round trip from Umeå" when it ends where it began), with the passengers' satisfaction in place of cargo damage. |
 | `/jobs game: [user]` | public | A player's finished jobs in one game, 10 per page, with Previous/Next buttons. |
 | `/leaderboard game: [period] [when] [division]` | public | Rankings: all-time, a month (`2026-10`) or an ISO week (`2026-W42`), in UTC. `division` narrows it to the Singleplayer Division. |
 | `/stats [user]` | public | A player's overall stats: both games together and each game, the number of jobs per outcome, and distance by map scale. |

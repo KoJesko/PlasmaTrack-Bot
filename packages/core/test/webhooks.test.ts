@@ -4,6 +4,7 @@ import { DiscordApiError } from '../src/discord/rest.ts';
 import { processQueueMessage } from '../src/interactions/tasks.ts';
 import type { QueueMessage } from '../src/interactions/types.ts';
 import { MemoryWorkQueue } from '../src/memory.ts';
+import { notificationDm } from '../src/webhooks/messages.ts';
 import { receiveWebhook, RECIPIENTS_PER_MESSAGE } from '../src/webhooks/receive.ts';
 import { parseSignatureHeader, signWebhook, verifyWebhookSignature, WEBHOOK_MAX_BYTES } from '../src/webhooks/signature.ts';
 import { captureLogger, FakeClock, taskDeps } from './helpers.ts';
@@ -106,6 +107,15 @@ describe('webhook signature', () => {
     for (const junk of [null, '', 't=1000', 'v1=abc', `t=abc,${sig.split(',')[1]}`]) {
       expect(await verifyWebhookSignature([SECRET], junk, body, 1000)).toBe(false);
     }
+  });
+});
+
+describe('player notification DMs', () => {
+  it('quote the server’s own limits, so a coach job’s 81 mph is never replaced by a truck limit', () => {
+    const text = 'Passengers: you drove over 81 mph for too long. This job’s distance now counts at 0.85×.';
+    const dm = notificationDm({ ...(notification().data as Parameters<typeof notificationDm>[0]), text });
+    expect(dm.message.embeds![0]!.description).toBe(text);
+    expect(dm.notice.text).toContain('over 81 mph');
   });
 });
 

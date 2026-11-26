@@ -6,7 +6,7 @@ import { ApplicationCommandOptionType, ButtonStyle, ComponentType, MessageFlags 
 import type { OutgoingMessage } from '../discord/rest.ts';
 import type { CommandDefinition, ComponentDefinition, TaskDefinition } from '../interactions/types.ts';
 import { SCALE_CLASS_LABELS, SCALE_CLASSES } from '../render/protocol.ts';
-import { discordTime, distance, escapeMarkdown, GAME_NAMES, GAME_SHORT, OUTCOME_LABELS, pointsText } from './format.ts';
+import { discordTime, distance, escapeMarkdown, GAME_NAMES, GAME_SHORT, listRouteText, OUTCOME_LABELS, pointsText } from './format.ts';
 import { booleanOption, PRIVATE_OPTION, stringOption, userOption } from './options.ts';
 
 // One player's overall picture (owner, 2026-10-15):
@@ -177,7 +177,7 @@ export const historyTask: TaskDefinition = {
     const lines = page.items.map(
       (j) =>
         `${GAME_SHORT[j.game]} \`${formatJobId(j.job_id)}\` ${OUTCOME_LABELS[j.outcome as Outcome]} · ${pointsText(j.outcome, j.points, j.held_points)} pts · ` +
-        `${distance(j.world_mi, j.world_km)} · ${escapeMarkdown(j.source.city_name)} → ${escapeMarkdown(j.destination.city_name)} · ` +
+        `${distance(j.world_mi, j.world_km)} · ${listRouteText(j)} · ` +
         `${discordTime(j.delivered_at, 'd')}${j.origin === 'manual' ? ' · by hand' : ''}`,
     );
     const filter = outcome ? ` (${OUTCOME_LABELS[outcome].toLowerCase()})` : '';

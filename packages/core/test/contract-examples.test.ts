@@ -62,6 +62,7 @@ const RESPONSES: Record<string, z.ZodType> = {
   player_token_revoke: S.tokenRevokedSchema,
   player_token_status: S.tokenMetaSchema,
   public_job: S.jobDetailSchema,
+  public_job_coach: S.jobDetailSchema,
   public_job_pending: S.jobDetailSchema,
   public_leaderboard: S.leaderboardSchema,
   public_leaderboard_by_fuel: S.leaderboardSchema,
@@ -105,6 +106,15 @@ describe('server contract examples', () => {
 
   it.each(Object.keys(RESPONSES))('%s parses', (name) => {
     expect(issues(RESPONSES[name]!.safeParse(load(name)))).toBeNull();
+  });
+
+  it('a coach job (server 433e39f) reads as one: job_type bus, its market, satisfaction', () => {
+    const job = S.jobDetailSchema.parse(load('public_job_coach'));
+    expect([job.job_type, job.market, job.passenger_satisfaction]).toEqual(['bus', 'tourist_job', 1]);
+    expect(job.source.city_id).toBe(job.destination.city_id);
+    expect(job.via?.map((v) => v.city_name)).toEqual(['Måbødalen Valley']);
+    expect(S.reviewQueueItemSchema.parse((load('admin_review_queue') as { items: unknown[] }).items[0]).job_type).toBe('freight');
+    expect(S.jobDetailSchema.parse(load('public_job')).passenger_satisfaction).toBeNull();
   });
 
   it.each(ROUTES)('%s parses, with only segment kinds and scale classes the bot knows', (name) => {

@@ -90,7 +90,12 @@ const scaleDistance = obj({
   world_mi: z.number().optional(),
   game_mi: z.number().optional(),
 });
-const distanceByScaleClass = z.partialRecord(z.enum(SCALE_CLASSES), scaleDistance);
+// Keyed by scale class. Classes this bot doesn't know yet are kept but never
+// shown (API_CONVENTIONS: ignore unknown fields), so a new server class such
+// as `multiplayer` (2026-11-25) can't break /job or /stats.
+const distanceByScaleClass = z.partialRecord(z.string(), scaleDistance) as unknown as z.ZodType<
+  Partial<Record<(typeof SCALE_CLASSES)[number], z.infer<typeof scaleDistance>>>
+>;
 
 export const gameStatsSchema = obj({
   points: z.number(),
@@ -168,6 +173,13 @@ export const multiplayerSchema = obj({
     .optional(),
 });
 
+export const JOB_TYPES = ['freight', 'car', 'bus'] as const;
+/**
+ * `freight` (truck), `car` (ATS road trip) or `bus` (ETS2 coach job, server
+ * 433e39f, 2026-11-25). Null on manual jobs and jobs scored before 2026-10-16.
+ */
+const jobTypeSchema = openEnum(JOB_TYPES).nullable().optional();
+
 export const jobSummarySchema = obj({
   job_id: z.string(),
   game,
@@ -181,7 +193,11 @@ export const jobSummarySchema = obj({
   cargo: obj({ id: z.string().nullable(), name: z.string() }),
   source: placeSchema,
   destination: placeSchema,
+  /** The game's market; a coach job's is `company_job` (a coach line) or `tourist_job`. */
   market: z.string().nullable().optional(),
+  job_type: jobTypeSchema,
+  /** Coach jobs only: the stops between `source` and `destination`, in order (server e7b2cfa). Null otherwise. */
+  via: z.array(placeSchema).nullable().optional(),
   delivered_at: timestamp,
   reported_delivered_at: timestamp.optional(),
   multiplayer: multiplayerSchema.optional(),
@@ -194,6 +210,8 @@ export const jobSummarySchema = obj({
   /** Whole units of `currency` (EUR for ETS2, USD for ATS); a manual job's submitted profit. */
   income: nullableNumber.optional(),
   currency: z.string().optional(),
+  /** Coach jobs only: the passengers' satisfaction, 0–1 (server 433e39f). Null on every other job. */
+  passenger_satisfaction: nullableNumber.optional(),
 });
 export type JobSummary = z.infer<typeof jobSummarySchema>;
 
@@ -432,6 +450,10 @@ export const reviewQueueItemSchema = obj({
   cargo: obj({ id: z.string().nullable(), name: z.string() }).optional(),
   source: obj({ city_id: z.string().nullable(), city_name: z.string() }).optional(),
   destination: obj({ city_id: z.string().nullable(), city_name: z.string() }).optional(),
+  /** Server e7b2cfa: what kind of job, so a coach job reads as one (PUBLIC_API §3). */
+  job_type: jobTypeSchema,
+  market: z.string().nullable().optional(),
+  via: z.array(obj({ city_id: z.string().nullable(), city_name: z.string() })).nullable().optional(),
   delivered_at: timestamp,
   age_s: z.number().optional(),
   reasons: z.array(reasonSchema).default([]),

@@ -7,7 +7,7 @@ import { MAP_CREDIT_LINE } from '../../credits.ts';
 import { ApplicationCommandOptionType, ButtonStyle, ComponentType } from '../../discord/constants.ts';
 import type { OutgoingFile } from '../../discord/rest.ts';
 import type { CommandDefinition, ComponentDefinition, ModalDefinition, TaskDefinition, TaskDeps } from '../../interactions/types.ts';
-import { discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, multiplayerLabel, OUTCOME_LABELS, pointsText } from '../format.ts';
+import { coachLabel, discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, jobHeadline, listRouteText, multiplayerLabel, OUTCOME_LABELS, pointsText, satisfactionText } from '../format.ts';
 import { stringOption, subcommand } from '../options.ts';
 import { evidenceImages } from '../submit.ts';
 import { jobCharts } from '../charts.ts';
@@ -145,7 +145,7 @@ export const reviewQueueTask: TaskDefinition = {
             placeholder: 'Open a job…',
             options: page.items.slice(0, 25).map((j) => ({
               label: `${formatJobId(j.job_id)} · ${GAME_SHORT[j.game]} · ${OUTCOME_LABELS[j.outcome]}`,
-              description: `${j.player.display_name} · ${j.reasons.map((r) => r.code).join(', ')}`.slice(0, 100),
+              description: `${coachLabel(j) ? `${coachLabel(j)} · ` : ''}${j.player.display_name} · ${j.reasons.map((r) => r.code).join(', ')}`.slice(0, 100),
               value: j.job_id,
             })),
           },
@@ -166,7 +166,9 @@ export const reviewQueueTask: TaskDefinition = {
 function queueLine(j: ReviewQueueItem): string {
   const held = j.held_points !== null && j.held_points !== undefined ? ` · ${j.held_points} held` : '';
   const age = j.age_s !== undefined ? ` · ${Math.round(j.age_s / 3600)} h old` : '';
-  return `\`${formatJobId(j.job_id)}\` ${GAME_SHORT[j.game]} · ${OUTCOME_LABELS[j.outcome]}${held} · ${escapeMarkdown(j.player.display_name)} · ${j.reasons.map((r) => r.code).join(', ') || '—'}${age}`;
+  // A coach job (server e7b2cfa) says so: "Tourist trip: round trip from Umeå via Måbødalen Valley".
+  const coach = coachLabel(j) && j.source && j.destination ? ` · ${listRouteText({ ...j, source: j.source, destination: j.destination })}` : '';
+  return `\`${formatJobId(j.job_id)}\` ${GAME_SHORT[j.game]} · ${OUTCOME_LABELS[j.outcome]}${held}${coach} · ${escapeMarkdown(j.player.display_name)} · ${j.reasons.map((r) => r.code).join(', ') || '—'}${age}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +276,8 @@ export function jobEmbed(job: AdminJobDetail): APIEmbed {
   } else if (job.fuel_readable === false) {
     fields.push({ name: 'Fuel', value: 'not readable (beyond any tank)', inline: true });
   }
+  const satisfaction = satisfactionText(job.passenger_satisfaction);
+  if (satisfaction) fields.push({ name: 'Passenger satisfaction', value: satisfaction, inline: true });
   const integrity = job.integrity ?? {};
   const failedChecks = Array.isArray(integrity['trace_checks'])
     ? (integrity['trace_checks'] as { check?: unknown; ok?: unknown }[]).filter((c) => c.ok === false).map((c) => String(c.check))
@@ -299,7 +303,7 @@ export function jobEmbed(job: AdminJobDetail): APIEmbed {
   }
   return {
     title: `Job ${formatJobId(job.job_id)} · ${GAME_SHORT[job.game]} · ${OUTCOME_LABELS[job.outcome]}`,
-    description: `**${escapeMarkdown(job.cargo.name)}**: ${escapeMarkdown(job.source.city_name)} → ${escapeMarkdown(job.destination.city_name)}`,
+    description: jobHeadline(job),
     fields: fields.slice(0, 25),
   };
 }

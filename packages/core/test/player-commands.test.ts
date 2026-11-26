@@ -292,6 +292,56 @@ describe('/job', () => {
     const normal = await run(commandInteraction('job', { options: [opt('id', '7K2M9QXA')] }));
     expect(normal.sent!.embeds![0]!.fields!.find((f) => f.name === 'Fuel used')?.value).toBe('41.2 L');
   });
+
+  it('shows a coach job as a coach line or tourist trip, first to last stop, with the passengers’ satisfaction', async () => {
+    const { run, server } = setup();
+    server.addJob({
+      job_id: 'C0ACH001', game: 'ets2', owner: PLAYER_ID, outcome: 'valid', points: 14.4,
+      coach: { market: 'company_job', from: ['reykjavik', 'Reykjavík'], to: ['hofn', 'Höfn í Hornafirði'], satisfaction: 0.875 },
+    });
+    server.addJob({
+      job_id: 'T0R1ST00', game: 'ets2', owner: PLAYER_ID, outcome: 'valid', points: 89.5,
+      coach: { market: 'tourist_job', from: ['umea', 'Umeå'], to: ['umea', 'Umeå'], via: [['scmabodalen', 'Måbødalen Valley']], satisfaction: 1 },
+    });
+    server.addJob({
+      job_id: 'C0ACH002', game: 'ets2', owner: PLAYER_ID, outcome: 'valid',
+      coach: {
+        market: 'company_job', from: ['reykjavik', 'Reykjavík'], to: ['reykjavik', 'Reykjavík'], satisfaction: 0.9,
+        via: [['borgarnes', 'Borgarnes'], ['akureyri', 'Akureyri'], ['egilsstadir', 'Egilsstaðir'], ['hofn', 'Höfn í Hornafirði']],
+      },
+    });
+    server.addJob({
+      job_id: 'NEWC0ACH', game: 'ets2', owner: PLAYER_ID, outcome: 'valid',
+      coach: { market: 'some_future_market', from: ['oslo', 'Oslo'], to: ['bergen', 'Bergen'], satisfaction: null },
+    });
+    const show = async (id: string) => (await run(commandInteraction('job', { options: [opt('id', id)] }))).sent!.embeds![0]!;
+    const field = (e: { fields?: { name: string; value: string }[] }, n: string) => e.fields!.find((f) => f.name === n)?.value;
+
+    const line = await show('C0ACH001');
+    expect(line.description).toBe('**Coach line**: Reykjavík → Höfn í Hornafirði');
+    expect(field(line, 'Passenger satisfaction')).toBe('87.5%');
+    expect(field(line, 'Cargo damage')).toBeUndefined();
+    const tour = await show('T0R1ST00');
+    expect(tour.description).toBe('**Tourist trip**: round trip from Umeå via Måbødalen Valley');
+    // A long line names its stops in a field instead of the headline.
+    const long = await show('C0ACH002');
+    expect(long.description).toBe('**Coach line**: round trip from Reykjavík via 4 stops');
+    expect(field(long, 'Stops')).toBe('1. Reykjavík\n2. Borgarnes\n3. Akureyri\n4. Egilsstaðir\n5. Höfn í Hornafirði\n6. Reykjavík');
+    expect(field(tour, 'Stops')).toBeUndefined();
+    expect(field(tour, 'Passenger satisfaction')).toBe('100%');
+    // A market the bot doesn't know is still a coach job; no satisfaction, no field.
+    const other = await show('NEWC0ACH');
+    expect(other.description).toBe('**Coach trip**: Oslo → Bergen');
+    expect(field(other, 'Passenger satisfaction')).toBeUndefined();
+    // Freight is unchanged.
+    expect(field(await show('7K2M9QXA'), 'Passenger satisfaction')).toBeUndefined();
+
+    const list = await run(commandInteraction('jobs', { user: PLAYER_ID, options: [opt('game', 'ets2')] }));
+    const lines = list.sent!.embeds![0]!.description!;
+    expect(lines).toContain('Tourist trip: round trip from Umeå via Måbødalen Valley');
+    expect(lines).toContain('Coach line: Reykjavík → Höfn í Hornafirði');
+    expect(lines).toContain('Dover → Calais');
+  });
 });
 
 describe('/jobs and /leaderboard', () => {

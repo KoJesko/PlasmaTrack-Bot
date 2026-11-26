@@ -24,13 +24,15 @@ export const COMPRESS_MAX_INPUT_BYTES = 25 * 1024 * 1024;
  * derives a class from a scale value; anything it doesn't recognise is drawn
  * as `unknown`.
  */
-export const SCALE_CLASSES = ['city', 'road', 'one_to_one', 'nonstandard', 'unknown'] as const;
+export const SCALE_CLASSES = ['city', 'road', 'one_to_one', 'multiplayer', 'nonstandard', 'unknown'] as const;
 export type ScaleClass = (typeof SCALE_CLASSES)[number];
 
 export const SCALE_CLASS_LABELS: Record<ScaleClass, string> = {
   city: 'City scale',
   road: 'Road scale (vanilla)',
   one_to_one: '1:1',
+  // A multiplayer session's own scale (Convoy holds one for the whole session; TrucklineMP holds ATS at 19).
+  multiplayer: 'Multiplayer scale',
   nonstandard: 'Non-standard scale',
   unknown: 'Scale not reported',
 };

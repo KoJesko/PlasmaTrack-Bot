@@ -48,6 +48,66 @@ export function multiplayerLabel(mp: JobSummary['multiplayer']): string | null {
   return MULTIPLAYER_LABELS[mp.kind] ?? null;
 }
 
+// Coach jobs (ETS2 Coaches DLC, server 433e39f): `job_type` `bus`, first stop
+// to last stop, and the passengers' satisfaction instead of cargo damage.
+
+type Place = Pick<JobSummary['source'], 'city_id' | 'city_name'> & Partial<JobSummary['source']>;
+type JobRoute = Pick<JobSummary, 'job_type' | 'market'> & { source: Place; destination: Place; via?: Place[] | null | undefined };
+
+/** Up to this many stops in between are named; more read "via 4 stops". */
+export const VIA_NAMED_MAX = 3;
+
+/** "Coach line" or "Tourist trip" for a coach job; null for any other job. */
+export function coachLabel(job: Pick<JobSummary, 'job_type' | 'market'>): string | null {
+  if (job.job_type !== 'bus') return null;
+  if (job.market === 'tourist_job') return 'Tourist trip';
+  if (job.market === 'company_job') return 'Coach line';
+  return 'Coach trip';
+}
+
+/** A coach trip that ends at the stop it started from (most tourist trips). */
+export function isRoundTrip(job: JobRoute): boolean {
+  if (job.job_type !== 'bus') return false;
+  const { source: a, destination: b } = job;
+  return a.city_id && b.city_id ? a.city_id === b.city_id : a.city_name === b.city_name;
+}
+
+const cityName = (p: Place) => escapeMarkdown(p.city_name);
+
+/** " via Måbødalen Valley", " via A, B and C", " via 4 stops"; "" when a coach job has none in between. */
+export function viaText(job: JobRoute): string {
+  const via = job.job_type === 'bus' ? (job.via ?? []) : [];
+  if (via.length === 0) return '';
+  if (via.length > VIA_NAMED_MAX) return ` via ${via.length} stops`;
+  const names = via.map(cityName);
+  return ` via ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}`;
+}
+
+/**
+ * "Dover → Calais"; a coach round trip reads "round trip from Umeå", and a
+ * coach job adds its stops in between ("… via Måbødalen Valley"). `place` formats one end.
+ */
+export function routeText(job: JobRoute, place: (p: Place) => string = cityName): string {
+  const ends = isRoundTrip(job) ? `round trip from ${place(job.source)}` : `${place(job.source)} → ${place(job.destination)}`;
+  return `${ends}${viaText(job)}`;
+}
+
+/** The embed headline: the cargo, or for a coach job what kind of trip it was. */
+export function jobHeadline(job: JobRoute & Pick<JobSummary, 'cargo'>, place?: (p: Place) => string): string {
+  return `**${coachLabel(job) ?? escapeMarkdown(job.cargo.name)}**: ${routeText(job, place)}`;
+}
+
+/** A list line's route: a coach job says what kind of trip it was ("Coach line: Reykjavík → Höfn"). */
+export function listRouteText(job: JobRoute): string {
+  const coach = coachLabel(job);
+  return coach ? `${coach}: ${routeText(job)}` : routeText(job);
+}
+
+/** 0–1 → "87.5%". Null when the server gave none (every non-coach job). */
+export function satisfactionText(s: number | null | undefined): string | null {
+  return typeof s === 'number' && Number.isFinite(s) ? `${Math.round(s * 1000) / 10}%` : null;
+}
+
 /** Points as the server gave them; a job in review shows what it holds. */
 export function pointsText(outcome: Outcome, points: number | null, held: number | null | undefined): string {
   if (outcome === 'pending_review') return held === null || held === undefined ? 'held for review' : `${held} (held for review)`;
