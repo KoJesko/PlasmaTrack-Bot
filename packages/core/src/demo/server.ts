@@ -58,6 +58,11 @@ interface Job {
   multiplayer?: { kind: string; name?: string };
   /** `false`: the fuel readings were beyond any tank, so fuel used is unknown (server PR #6). */
   fuel_readable?: false;
+  /**
+   * A coach job (server 433e39f): `job_type` `bus`, its market, first and last
+   * stop (the same for a round trip) and the passengers' satisfaction, 0–1.
+   */
+  coach?: { market: string; from: [id: string, name: string]; to: [id: string, name: string]; satisfaction: number | null };
 }
 
 interface Evidence {
@@ -1009,11 +1014,13 @@ export class MockPlasmaTrackServer {
         source: { city_id: null, city_name: s['start_city'], company_id: null, company_name: s['start_company'] },
         destination: { city_id: null, city_name: s['end_city'], company_id: null, company_name: s['end_company'] },
         market: null,
+        job_type: null,
         delivered_at: j.delivered_at,
         reported_delivered_at: s['ended_at'],
         multiplayer: { kind: 'unknown', truckersmp: null },
         origin: 'manual',
         ...this.extras(j),
+        passenger_satisfaction: null,
       };
     }
     return {
@@ -1027,14 +1034,28 @@ export class MockPlasmaTrackServer {
       world_mi: Math.round(j.world_km * 0.621371 * 100) / 100,
       game_km: j.game_km,
       game_mi: Math.round(j.game_km * 0.621371 * 100) / 100,
-      cargo: { id: 'med_vaccine', name: 'Vaccines' },
-      source: { city_id: 'dover', city_name: 'Dover', company_id: 'euroacres', company_name: 'EuroAcres' },
-      destination: { city_id: 'calais', city_name: 'Calais', company_id: 'lkwlog', company_name: 'LKW Log' },
-      market: 'cargo_market',
+      ...(j.coach
+        ? {
+            cargo: { id: 'passengers', name: 'Passengers' },
+            source: { city_id: j.coach.from[0], city_name: j.coach.from[1], company_id: 'city', company_name: '' },
+            destination: { city_id: j.coach.to[0], city_name: j.coach.to[1], company_id: 'city', company_name: '' },
+            market: j.coach.market,
+            job_type: 'bus',
+          }
+        : {
+            cargo: { id: 'med_vaccine', name: 'Vaccines' },
+            source: { city_id: 'dover', city_name: 'Dover', company_id: 'euroacres', company_name: 'EuroAcres' },
+            destination: { city_id: 'calais', city_name: 'Calais', company_id: 'lkwlog', company_name: 'LKW Log' },
+            market: 'cargo_market',
+            job_type: 'freight',
+          }),
       delivered_at: j.delivered_at,
       reported_delivered_at: '2026-10-13T21:25:00.070Z',
       multiplayer: { ...(j.multiplayer ?? { kind: 'singleplayer' }), truckersmp: null },
       ...this.extras(j),
+      // A coach carries no cargo: no damage, the passengers' satisfaction instead.
+      ...(j.coach ? { damage_pct: null } : {}),
+      passenger_satisfaction: j.coach ? j.coach.satisfaction : null,
       some_future_field: { ignored: true },
     };
   }

@@ -8,7 +8,7 @@ import type { OutgoingFile } from '../discord/rest.ts';
 import { UserFacingError, type CommandDefinition, type TaskDefinition, type TaskDeps } from '../interactions/types.ts';
 import type { BarsRenderRequest } from '../render/protocol.ts';
 import { JOB_CHARTS, jobCharts, type JobChart } from './charts.ts';
-import { escapeMarkdown, GAME_NAMES, GAME_SHORT, isGame, OUTCOME_LABELS } from './format.ts';
+import { escapeMarkdown, GAME_NAMES, GAME_SHORT, isGame, jobHeadline, OUTCOME_LABELS } from './format.ts';
 import { MONTH, WEEK } from './lists.ts';
 import { booleanOption, GAME_OPTION, PRIVATE_OPTION, stringOption, subcommand, userOption } from './options.ts';
 
@@ -356,7 +356,7 @@ export const graphJobTask: TaskDefinition = {
     const embeds: APIEmbed[] = [
       {
         title: `${title} · ${GAME_NAMES[job.game]} · ${OUTCOME_LABELS[job.outcome]}`,
-        description: `**${escapeMarkdown(job.cargo.name)}**: ${escapeMarkdown(job.source.city_name)} → ${escapeMarkdown(job.destination.city_name)}`,
+        description: jobHeadline(job),
         footer: {
           text: [
             'Parts undone by loading a save are left out.',

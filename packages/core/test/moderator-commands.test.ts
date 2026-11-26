@@ -146,6 +146,18 @@ describe('/review', () => {
     expect(field('Fuel')).toBe('not readable (beyond any tank)');
   });
 
+  it('shows a coach job’s trip and passenger satisfaction', async () => {
+    const { run, server } = setup();
+    server.addJob({
+      job_id: 'T0R1ST00', game: 'ets2', owner: PLAYER_ID, outcome: 'pending_review', held_points: 44.7,
+      coach: { market: 'tourist_job', from: ['umea', 'Umeå'], to: ['umea', 'Umeå'], satisfaction: 0.5 },
+    });
+    const view = await run(commandInteraction('review', mod({ options: [sub('job', [opt('id', 'T0R1ST00')])] })));
+    const embed = view.sent!.embeds![0]!;
+    expect(embed.description).toBe('**Tourist trip**: round trip from Umeå');
+    expect(embed.fields!.find((f) => f.name === 'Passenger satisfaction')?.value).toBe('50%');
+  });
+
   it('a voided job only offers Restore', async () => {
     const { run, server } = setup();
     server.addJob({ job_id: 'V01DED00', game: 'ats', owner: PLAYER_ID, outcome: 'voided', before_void: 'valid' });

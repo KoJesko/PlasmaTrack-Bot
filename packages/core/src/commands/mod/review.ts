@@ -7,7 +7,7 @@ import { MAP_CREDIT_LINE } from '../../credits.ts';
 import { ApplicationCommandOptionType, ButtonStyle, ComponentType } from '../../discord/constants.ts';
 import type { OutgoingFile } from '../../discord/rest.ts';
 import type { CommandDefinition, ComponentDefinition, ModalDefinition, TaskDefinition, TaskDeps } from '../../interactions/types.ts';
-import { discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, multiplayerLabel, OUTCOME_LABELS, pointsText } from '../format.ts';
+import { discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, jobHeadline, multiplayerLabel, OUTCOME_LABELS, pointsText, satisfactionText } from '../format.ts';
 import { stringOption, subcommand } from '../options.ts';
 import { evidenceImages } from '../submit.ts';
 import { jobCharts } from '../charts.ts';
@@ -274,6 +274,8 @@ export function jobEmbed(job: AdminJobDetail): APIEmbed {
   } else if (job.fuel_readable === false) {
     fields.push({ name: 'Fuel', value: 'not readable (beyond any tank)', inline: true });
   }
+  const satisfaction = satisfactionText(job.passenger_satisfaction);
+  if (satisfaction) fields.push({ name: 'Passenger satisfaction', value: satisfaction, inline: true });
   const integrity = job.integrity ?? {};
   const failedChecks = Array.isArray(integrity['trace_checks'])
     ? (integrity['trace_checks'] as { check?: unknown; ok?: unknown }[]).filter((c) => c.ok === false).map((c) => String(c.check))
@@ -299,7 +301,7 @@ export function jobEmbed(job: AdminJobDetail): APIEmbed {
   }
   return {
     title: `Job ${formatJobId(job.job_id)} · ${GAME_SHORT[job.game]} · ${OUTCOME_LABELS[job.outcome]}`,
-    description: `**${escapeMarkdown(job.cargo.name)}**: ${escapeMarkdown(job.source.city_name)} → ${escapeMarkdown(job.destination.city_name)}`,
+    description: jobHeadline(job),
     fields: fields.slice(0, 25),
   };
 }

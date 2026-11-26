@@ -76,7 +76,9 @@ Oldest first, with `total`. Each item:
 
 **Invalid:** `outcome = invalid`. Its reason is `overspeed_invalid` (rule 2), with `peak_mph`,
 `over_invalid_s` and `invalid_over_mph`. A moderator may approve it, for example after falling
-through the map.
+through the map. `invalid_over_mph` is the job's own limit: a road trip's, or a coach job's
+(100 mph, PUBLIC_API §3 "Coach jobs"), where the game's truck limit does not apply. The same goes
+for `penalty_over_mph` and `invalid_over_mph` in the detail's `speed` (§4) and in the series (§5).
 
 ## 3. TruckersMP account flags (PLAN §8, decision 24)
 
@@ -298,6 +300,10 @@ Returns a time-limited signed URL. The Worker streams the file from storage.
 The server then emits `job.scored` (WEBHOOKS §4).
 
 ## 8. Recalculation (§4.29)
+
+**Past jobs change only on purpose.** A new config version, or a new server version, does not
+re-score jobs already stored as delivered: they keep what they were scored with when uploaded,
+and players are not notified again. A recalculation is how new rules reach them.
 
 **Moderator decisions stick.** `approved`, `rejected` and `voided` keep their outcome through a
 recalculation; their points are recomputed (for example a new bonus applies to an approved job).

@@ -9,7 +9,7 @@ import { ApplicationCommandOptionType, MessageFlags } from '../discord/constants
 import type { OutgoingFile } from '../discord/rest.ts';
 import type { CommandDefinition, TaskDefinition, TaskDeps } from '../interactions/types.ts';
 import { SCALE_CLASS_LABELS, SCALE_CLASSES } from '../render/protocol.ts';
-import { discordTime, distance, escapeMarkdown, GAME_SHORT, multiplayerLabel, OUTCOME_LABELS, pointsText } from './format.ts';
+import { discordTime, distance, escapeMarkdown, GAME_SHORT, jobHeadline, multiplayerLabel, OUTCOME_LABELS, pointsText, satisfactionText } from './format.ts';
 import { MAX_EVIDENCE_BYTES, money } from './manual-fields.ts';
 import { booleanOption, PRIVATE_OPTION, stringOption } from './options.ts';
 import { evidenceButton } from './submit.ts';
@@ -97,8 +97,6 @@ export const jobTask: TaskDefinition = {
 };
 
 export function jobEmbed(job: JobDetail): APIEmbed {
-  const from = place(job.source);
-  const to = place(job.destination);
   const fields: APIEmbedField[] = [
     { name: 'Outcome', value: OUTCOME_LABELS[job.outcome], inline: true },
     { name: 'Points', value: pointsText(job.outcome, job.points, job.held_points), inline: true },
@@ -123,6 +121,9 @@ export function jobEmbed(job: JobDetail): APIEmbed {
     fields.push({ name: 'Fuel used', value: 'not readable', inline: true });
   }
   if (typeof job.damage_pct === 'number') fields.push({ name: 'Cargo damage', value: `${job.damage_pct}%`, inline: true });
+  // Coach jobs: it scales their points (server 433e39f).
+  const satisfaction = satisfactionText(job.passenger_satisfaction);
+  if (satisfaction) fields.push({ name: 'Passenger satisfaction', value: satisfaction, inline: true });
   if (typeof job.income === 'number') fields.push({ name: 'Income', value: money(job.income, job.game), inline: true });
 
   const scale = scaleBreakdown(job);
@@ -132,7 +133,7 @@ export function jobEmbed(job: JobDetail): APIEmbed {
   }
   return {
     title: `Job ${formatJobId(job.job_id)} · ${GAME_SHORT[job.game]}`,
-    description: `**${escapeMarkdown(job.cargo.name)}**: ${from} → ${to}${job.origin === 'manual' ? '\nSubmitted by hand' : ''}`,
+    description: `${jobHeadline(job, place)}${job.origin === 'manual' ? '\nSubmitted by hand' : ''}`,
     ...(OUTCOME_COLORS[job.outcome] !== undefined ? { color: OUTCOME_COLORS[job.outcome] } : {}),
     fields,
   };

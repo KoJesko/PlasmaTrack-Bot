@@ -5,7 +5,7 @@ import type { Division, Game, LeaderboardPeriod } from '../api/schemas.ts';
 import { ApplicationCommandOptionType, ButtonStyle, ComponentType, MessageFlags } from '../discord/constants.ts';
 import type { OutgoingMessage } from '../discord/rest.ts';
 import type { CommandDefinition, ComponentDefinition, TaskDefinition } from '../interactions/types.ts';
-import { discordTime, distance, escapeMarkdown, GAME_NAMES, isGame, OUTCOME_LABELS, pointsText } from './format.ts';
+import { discordTime, distance, escapeMarkdown, GAME_NAMES, isGame, listRouteText, OUTCOME_LABELS, pointsText } from './format.ts';
 import { booleanOption, GAME_OPTION, PRIVATE_OPTION, stringOption, userOption } from './options.ts';
 
 // /jobs and /leaderboard: paginated lists. The page state (including the
@@ -74,7 +74,7 @@ export const jobsTask: TaskDefinition = {
     const lines = page.items.map(
       (j) =>
         `\`${formatJobId(j.job_id)}\` ${OUTCOME_LABELS[j.outcome]} · ${pointsText(j.outcome, j.points, j.held_points)} pts · ` +
-        `${distance(j.world_mi, j.world_km)} · ${escapeMarkdown(j.source.city_name)} → ${escapeMarkdown(j.destination.city_name)} · ${discordTime(j.delivered_at, 'd')}`,
+        `${distance(j.world_mi, j.world_km)} · ${listRouteText(j)} · ${discordTime(j.delivered_at, 'd')}`,
     );
     const embed: APIEmbed = {
       title: `${GAME_NAMES[game]} jobs`,

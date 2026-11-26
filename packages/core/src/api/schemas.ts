@@ -168,6 +168,13 @@ export const multiplayerSchema = obj({
     .optional(),
 });
 
+export const JOB_TYPES = ['freight', 'car', 'bus'] as const;
+/**
+ * `freight` (truck), `car` (ATS road trip) or `bus` (ETS2 coach job, server
+ * 433e39f, 2026-11-25). Null on manual jobs and jobs scored before 2026-10-16.
+ */
+const jobTypeSchema = openEnum(JOB_TYPES).nullable().optional();
+
 export const jobSummarySchema = obj({
   job_id: z.string(),
   game,
@@ -181,7 +188,9 @@ export const jobSummarySchema = obj({
   cargo: obj({ id: z.string().nullable(), name: z.string() }),
   source: placeSchema,
   destination: placeSchema,
+  /** The game's market; a coach job's is `company_job` (a coach line) or `tourist_job`. */
   market: z.string().nullable().optional(),
+  job_type: jobTypeSchema,
   delivered_at: timestamp,
   reported_delivered_at: timestamp.optional(),
   multiplayer: multiplayerSchema.optional(),
@@ -194,6 +203,8 @@ export const jobSummarySchema = obj({
   /** Whole units of `currency` (EUR for ETS2, USD for ATS); a manual job's submitted profit. */
   income: nullableNumber.optional(),
   currency: z.string().optional(),
+  /** Coach jobs only: the passengers' satisfaction, 0–1 (server 433e39f). Null on every other job. */
+  passenger_satisfaction: nullableNumber.optional(),
 });
 export type JobSummary = z.infer<typeof jobSummarySchema>;
 
