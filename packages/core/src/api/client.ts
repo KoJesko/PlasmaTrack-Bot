@@ -279,6 +279,10 @@ export class PlasmaTrackApi {
     schema: S,
     options: RequestOptions = {},
   ): Promise<z.output<S>> {
+    // URL parsing resolves `.` and `..` (also percent-encoded), which would reach another endpoint.
+    if (path.split('/').some((p) => /^(?:\.|%2e){1,2}$/i.test(p))) {
+      throw new ApiError(404, 'not_found', `${method} ${routeTemplate(path)}: invalid path`);
+    }
     const url = new URL(this.baseUrl + API_PREFIX + path);
     for (const [k, v] of Object.entries(options.query ?? {})) {
       if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
@@ -430,7 +434,7 @@ export class AdminApi {
   }
 
   operation(operationId: string) {
-    return this.req('GET', `/operations/${operationId}`, operationSchema);
+    return this.req('GET', `/operations/${seg(operationId)}`, operationSchema);
   }
 
   // §9 Bonuses
@@ -441,7 +445,7 @@ export class AdminApi {
   }
 
   getBonus(bonusId: string) {
-    return this.req('GET', `/bonuses/${bonusId}`, bonusSchema);
+    return this.req('GET', `/bonuses/${seg(bonusId)}`, bonusSchema);
   }
 
   createBonus(bonus: BonusInput, meta: WriteMeta) {
@@ -449,11 +453,11 @@ export class AdminApi {
   }
 
   updateBonus(bonusId: string, changes: Partial<BonusInput>, meta: WriteMeta) {
-    return this.write('PATCH', `/bonuses/${bonusId}`, bonusSchema, meta, changes);
+    return this.write('PATCH', `/bonuses/${seg(bonusId)}`, bonusSchema, meta, changes);
   }
 
   archiveBonus(bonusId: string, meta: WriteMeta) {
-    return this.write('DELETE', `/bonuses/${bonusId}`, bonusSchema, meta);
+    return this.write('DELETE', `/bonuses/${seg(bonusId)}`, bonusSchema, meta);
   }
 
   // §10 Players and tokens
@@ -488,7 +492,7 @@ export class AdminApi {
   }
 
   makeConfigVersionCurrent(versionId: string, meta: WriteMeta) {
-    return this.write('POST', `/config-versions/${versionId}/make-current`, configVersionSchema, meta);
+    return this.write('POST', `/config-versions/${seg(versionId)}/make-current`, configVersionSchema, meta);
   }
 
   listReleases(options: ListOptions = {}) {
@@ -501,7 +505,7 @@ export class AdminApi {
 
   /** Starts or stops offering a release's update to installed clients (422 without an update). */
   offerRelease(releaseId: string, offered: boolean, meta: WriteMeta) {
-    return this.write('POST', `/releases/${releaseId}/offer`, releaseSchema, meta, { offered });
+    return this.write('POST', `/releases/${seg(releaseId)}/offer`, releaseSchema, meta, { offered });
   }
 
   listRevocations(options: ListOptions & { status?: string } = {}) {
@@ -515,7 +519,7 @@ export class AdminApi {
   }
 
   cancelRevocation(revocationId: string, meta: WriteMeta) {
-    return this.write('POST', `/revocations/${revocationId}/cancel`, revocationSchema, meta);
+    return this.write('POST', `/revocations/${seg(revocationId)}/cancel`, revocationSchema, meta);
   }
 
   // §12 Admins
@@ -650,6 +654,15 @@ function retryAfter(res: Response, details: Record<string, unknown>): number | u
   if (Number.isFinite(header) && header > 0) return header;
   const fromBody = details['retry_after_s'];
   return typeof fromBody === 'number' && fromBody > 0 ? fromBody : undefined;
+}
+
+/**
+ * One path segment from text a user typed (operation, bonus, release… IDs),
+ * percent-encoded so `/`, `?` and `#` can't change which endpoint is called.
+ * Dot segments (`..`) are refused in `request`.
+ */
+export function seg(id: string): string {
+  return encodeURIComponent(id);
 }
 
 /** Log-safe route: IDs replaced by placeholders. */
