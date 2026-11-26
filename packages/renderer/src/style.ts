@@ -8,11 +8,12 @@ import type { RouteExtra, RouteGeoJson, ScaleClass } from '@plasmatrack/core';
 
 export type Game = 'ets2' | 'ats';
 
-/** Route colours by scale class (decided 2026-09-28): city grey, road blue, 1:1 orange, non-standard red, unknown dashed. */
+/** Route colours by scale class (decided 2026-09-28; multiplayer 2026-11-25): city grey, road blue, 1:1 orange, multiplayer purple, non-standard red, unknown dashed. */
 export const SCALE_COLORS: Record<ScaleClass, string> = {
   city: '#8a8a8a',
   road: '#1f6feb',
   one_to_one: '#f28c28',
+  multiplayer: '#8957e5',
   nonstandard: '#d62828',
   unknown: '#3b3b3b',
 };
@@ -102,6 +103,7 @@ export function buildStyle(opts: StyleOptions): object {
     'city', SCALE_COLORS.city,
     'road', SCALE_COLORS.road,
     'one_to_one', SCALE_COLORS.one_to_one,
+    'multiplayer', SCALE_COLORS.multiplayer,
     'nonstandard', SCALE_COLORS.nonstandard,
     SCALE_COLORS.unknown,
   ];

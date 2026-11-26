@@ -1,7 +1,7 @@
 # Server API contract (vendored)
 
 These four files are copies of the PlasmaTrack server's bot-facing contract, v1 draft.
-They come from the server repository's `docs/` at commit **e7b2cfa** (branch `feat/coach-jobs`, 2026-11-25: coach jobs and their stops; not yet merged to the server's main).
+They come from the server repository's `docs/` at commit **0fcac12** (branch `feat/coach-jobs`, 2026-11-25: coach jobs, their stops, and the `multiplayer` scale class; not yet merged to the server's main).
 
 | File | What |
 |---|---|

@@ -998,6 +998,7 @@ export class MockPlasmaTrackServer {
         city: { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 },
         road: { world_km: sum((j) => j.world_km), world_mi: sum((j) => j.world_km * 0.621371), game_km: sum((j) => j.game_km), game_mi: sum((j) => j.game_km * 0.621371) },
         one_to_one: { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 },
+        multiplayer: { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 },
         nonstandard: { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 },
         unknown: { world_km: 0, world_mi: 0, game_km: 0, game_mi: 0 },
       },
@@ -1184,7 +1185,7 @@ export class MockPlasmaTrackServer {
       planned_distance_km: 62,
       speed_penalty_applied: j.speed_penalty === true,
       bonus: null,
-      distance_by_scale_class: { city: { world_km: 2.81, world_mi: 1.75, game_km: 8.43, game_mi: 5.24 }, road: { world_km: 8.57, world_mi: 5.33, game_km: 117.27, game_mi: 72.87 }, one_to_one: zero, nonstandard: zero, unknown: zero },
+      distance_by_scale_class: { city: { world_km: 2.81, world_mi: 1.75, game_km: 8.43, game_mi: 5.24 }, road: { world_km: 8.57, world_mi: 5.33, game_km: 117.27, game_mi: 72.87 }, one_to_one: zero, multiplayer: zero, nonstandard: zero, unknown: zero },
       public_notes: this.divisionMod(j)
         ? [{ code: 'discarded_singleplayer_division', text: `Discarded: a ${this.divisionMod(j)!.name} job by a Singleplayer Division player.` }]
         : j.outcome === 'pending_review'

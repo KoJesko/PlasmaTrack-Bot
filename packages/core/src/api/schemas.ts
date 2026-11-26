@@ -90,7 +90,12 @@ const scaleDistance = obj({
   world_mi: z.number().optional(),
   game_mi: z.number().optional(),
 });
-const distanceByScaleClass = z.partialRecord(z.enum(SCALE_CLASSES), scaleDistance);
+// Keyed by scale class. Classes this bot doesn't know yet are kept but never
+// shown (API_CONVENTIONS: ignore unknown fields), so a new server class such
+// as `multiplayer` (2026-11-25) can't break /job or /stats.
+const distanceByScaleClass = z.partialRecord(z.string(), scaleDistance) as unknown as z.ZodType<
+  Partial<Record<(typeof SCALE_CLASSES)[number], z.infer<typeof scaleDistance>>>
+>;
 
 export const gameStatsSchema = obj({
   points: z.number(),
