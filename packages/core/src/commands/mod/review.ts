@@ -7,7 +7,7 @@ import { MAP_CREDIT_LINE } from '../../credits.ts';
 import { ApplicationCommandOptionType, ButtonStyle, ComponentType } from '../../discord/constants.ts';
 import type { OutgoingFile } from '../../discord/rest.ts';
 import type { CommandDefinition, ComponentDefinition, ModalDefinition, TaskDefinition, TaskDeps } from '../../interactions/types.ts';
-import { discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, jobHeadline, multiplayerLabel, OUTCOME_LABELS, pointsText, satisfactionText } from '../format.ts';
+import { coachLabel, discordTime, distance, escapeMarkdown, GAME_SHORT, isGame, jobHeadline, listRouteText, multiplayerLabel, OUTCOME_LABELS, pointsText, satisfactionText } from '../format.ts';
 import { stringOption, subcommand } from '../options.ts';
 import { evidenceImages } from '../submit.ts';
 import { jobCharts } from '../charts.ts';
@@ -145,7 +145,7 @@ export const reviewQueueTask: TaskDefinition = {
             placeholder: 'Open a job…',
             options: page.items.slice(0, 25).map((j) => ({
               label: `${formatJobId(j.job_id)} · ${GAME_SHORT[j.game]} · ${OUTCOME_LABELS[j.outcome]}`,
-              description: `${j.player.display_name} · ${j.reasons.map((r) => r.code).join(', ')}`.slice(0, 100),
+              description: `${coachLabel(j) ? `${coachLabel(j)} · ` : ''}${j.player.display_name} · ${j.reasons.map((r) => r.code).join(', ')}`.slice(0, 100),
               value: j.job_id,
             })),
           },
@@ -166,7 +166,9 @@ export const reviewQueueTask: TaskDefinition = {
 function queueLine(j: ReviewQueueItem): string {
   const held = j.held_points !== null && j.held_points !== undefined ? ` · ${j.held_points} held` : '';
   const age = j.age_s !== undefined ? ` · ${Math.round(j.age_s / 3600)} h old` : '';
-  return `\`${formatJobId(j.job_id)}\` ${GAME_SHORT[j.game]} · ${OUTCOME_LABELS[j.outcome]}${held} · ${escapeMarkdown(j.player.display_name)} · ${j.reasons.map((r) => r.code).join(', ') || '—'}${age}`;
+  // A coach job (server e7b2cfa) says so: "Tourist trip: round trip from Umeå via Måbødalen Valley".
+  const coach = coachLabel(j) && j.source && j.destination ? ` · ${listRouteText({ ...j, source: j.source, destination: j.destination })}` : '';
+  return `\`${formatJobId(j.job_id)}\` ${GAME_SHORT[j.game]} · ${OUTCOME_LABELS[j.outcome]}${held}${coach} · ${escapeMarkdown(j.player.display_name)} · ${j.reasons.map((r) => r.code).join(', ') || '—'}${age}`;
 }
 
 // ---------------------------------------------------------------------------

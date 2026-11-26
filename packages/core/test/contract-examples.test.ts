@@ -112,6 +112,8 @@ describe('server contract examples', () => {
     const job = S.jobDetailSchema.parse(load('public_job_coach'));
     expect([job.job_type, job.market, job.passenger_satisfaction]).toEqual(['bus', 'tourist_job', 1]);
     expect(job.source.city_id).toBe(job.destination.city_id);
+    expect(job.via?.map((v) => v.city_name)).toEqual(['Måbødalen Valley']);
+    expect(S.reviewQueueItemSchema.parse((load('admin_review_queue') as { items: unknown[] }).items[0]).job_type).toBe('freight');
     expect(S.jobDetailSchema.parse(load('public_job')).passenger_satisfaction).toBeNull();
   });
 

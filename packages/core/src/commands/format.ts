@@ -51,8 +51,11 @@ export function multiplayerLabel(mp: JobSummary['multiplayer']): string | null {
 // Coach jobs (ETS2 Coaches DLC, server 433e39f): `job_type` `bus`, first stop
 // to last stop, and the passengers' satisfaction instead of cargo damage.
 
-type JobRoute = Pick<JobSummary, 'job_type' | 'market' | 'source' | 'destination'>;
-type Place = JobSummary['source'];
+type Place = Pick<JobSummary['source'], 'city_id' | 'city_name'> & Partial<JobSummary['source']>;
+type JobRoute = Pick<JobSummary, 'job_type' | 'market'> & { source: Place; destination: Place; via?: Place[] | null | undefined };
+
+/** Up to this many stops in between are named; more read "via 4 stops". */
+export const VIA_NAMED_MAX = 3;
 
 /** "Coach line" or "Tourist trip" for a coach job; null for any other job. */
 export function coachLabel(job: Pick<JobSummary, 'job_type' | 'market'>): string | null {
@@ -71,9 +74,22 @@ export function isRoundTrip(job: JobRoute): boolean {
 
 const cityName = (p: Place) => escapeMarkdown(p.city_name);
 
-/** "Dover → Calais"; a coach round trip reads "round trip from Umeå". `place` formats one end. */
+/** " via Måbødalen Valley", " via A, B and C", " via 4 stops"; "" when a coach job has none in between. */
+export function viaText(job: JobRoute): string {
+  const via = job.job_type === 'bus' ? (job.via ?? []) : [];
+  if (via.length === 0) return '';
+  if (via.length > VIA_NAMED_MAX) return ` via ${via.length} stops`;
+  const names = via.map(cityName);
+  return ` via ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}`;
+}
+
+/**
+ * "Dover → Calais"; a coach round trip reads "round trip from Umeå", and a
+ * coach job adds its stops in between ("… via Måbødalen Valley"). `place` formats one end.
+ */
 export function routeText(job: JobRoute, place: (p: Place) => string = cityName): string {
-  return isRoundTrip(job) ? `round trip from ${place(job.source)}` : `${place(job.source)} → ${place(job.destination)}`;
+  const ends = isRoundTrip(job) ? `round trip from ${place(job.source)}` : `${place(job.source)} → ${place(job.destination)}`;
+  return `${ends}${viaText(job)}`;
 }
 
 /** The embed headline: the cargo, or for a coach job what kind of trip it was. */

@@ -191,6 +191,8 @@ export const jobSummarySchema = obj({
   /** The game's market; a coach job's is `company_job` (a coach line) or `tourist_job`. */
   market: z.string().nullable().optional(),
   job_type: jobTypeSchema,
+  /** Coach jobs only: the stops between `source` and `destination`, in order (server e7b2cfa). Null otherwise. */
+  via: z.array(placeSchema).nullable().optional(),
   delivered_at: timestamp,
   reported_delivered_at: timestamp.optional(),
   multiplayer: multiplayerSchema.optional(),
@@ -443,6 +445,10 @@ export const reviewQueueItemSchema = obj({
   cargo: obj({ id: z.string().nullable(), name: z.string() }).optional(),
   source: obj({ city_id: z.string().nullable(), city_name: z.string() }).optional(),
   destination: obj({ city_id: z.string().nullable(), city_name: z.string() }).optional(),
+  /** Server e7b2cfa: what kind of job, so a coach job reads as one (PUBLIC_API §3). */
+  job_type: jobTypeSchema,
+  market: z.string().nullable().optional(),
+  via: z.array(obj({ city_id: z.string().nullable(), city_name: z.string() })).nullable().optional(),
   delivered_at: timestamp,
   age_s: z.number().optional(),
   reasons: z.array(reasonSchema).default([]),

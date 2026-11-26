@@ -60,9 +60,16 @@ interface Job {
   fuel_readable?: false;
   /**
    * A coach job (server 433e39f): `job_type` `bus`, its market, first and last
-   * stop (the same for a round trip) and the passengers' satisfaction, 0–1.
+   * stop (the same for a round trip), the stops in between (server e7b2cfa)
+   * and the passengers' satisfaction, 0–1.
    */
-  coach?: { market: string; from: [id: string, name: string]; to: [id: string, name: string]; satisfaction: number | null };
+  coach?: {
+    market: string;
+    from: [id: string, name: string];
+    to: [id: string, name: string];
+    via?: [id: string, name: string][];
+    satisfaction: number | null;
+  };
 }
 
 interface Evidence {
@@ -1015,6 +1022,7 @@ export class MockPlasmaTrackServer {
         destination: { city_id: null, city_name: s['end_city'], company_id: null, company_name: s['end_company'] },
         market: null,
         job_type: null,
+        via: null,
         delivered_at: j.delivered_at,
         reported_delivered_at: s['ended_at'],
         multiplayer: { kind: 'unknown', truckersmp: null },
@@ -1039,6 +1047,7 @@ export class MockPlasmaTrackServer {
             cargo: { id: 'passengers', name: 'Passengers' },
             source: { city_id: j.coach.from[0], city_name: j.coach.from[1], company_id: 'city', company_name: '' },
             destination: { city_id: j.coach.to[0], city_name: j.coach.to[1], company_id: 'city', company_name: '' },
+            via: (j.coach.via ?? []).map(([id, name]) => ({ city_id: id, city_name: name, company_id: 'city', company_name: '' })),
             market: j.coach.market,
             job_type: 'bus',
           }
@@ -1048,6 +1057,7 @@ export class MockPlasmaTrackServer {
             destination: { city_id: 'calais', city_name: 'Calais', company_id: 'lkwlog', company_name: 'LKW Log' },
             market: 'cargo_market',
             job_type: 'freight',
+            via: null,
           }),
       delivered_at: j.delivered_at,
       reported_delivered_at: '2026-10-13T21:25:00.070Z',

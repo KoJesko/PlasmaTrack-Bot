@@ -150,11 +150,16 @@ describe('/review', () => {
     const { run, server } = setup();
     server.addJob({
       job_id: 'T0R1ST00', game: 'ets2', owner: PLAYER_ID, outcome: 'pending_review', held_points: 44.7,
-      coach: { market: 'tourist_job', from: ['umea', 'Umeå'], to: ['umea', 'Umeå'], satisfaction: 0.5 },
+      coach: { market: 'tourist_job', from: ['umea', 'Umeå'], to: ['umea', 'Umeå'], via: [['scmabodalen', 'Måbødalen Valley']], satisfaction: 0.5 },
     });
+    // The queue says it is a coach job (job_type, server e7b2cfa); freight lines stay as they were.
+    const queue = await run(commandInteraction('review', mod({ options: [sub('queue')] })));
+    const lines = queue.sent!.embeds![0]!.description!.split('\n');
+    expect(lines.find((l) => l.includes('T0R1-ST00'))).toContain(' · Tourist trip: round trip from Umeå via Måbødalen Valley · ');
+    expect(lines.find((l) => l.includes('R3VW-5T6Y'))).not.toContain('Calais');
     const view = await run(commandInteraction('review', mod({ options: [sub('job', [opt('id', 'T0R1ST00')])] })));
     const embed = view.sent!.embeds![0]!;
-    expect(embed.description).toBe('**Tourist trip**: round trip from Umeå');
+    expect(embed.description).toBe('**Tourist trip**: round trip from Umeå via Måbødalen Valley');
     expect(embed.fields!.find((f) => f.name === 'Passenger satisfaction')?.value).toBe('50%');
   });
 
