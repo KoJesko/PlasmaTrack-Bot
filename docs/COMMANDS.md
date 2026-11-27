@@ -18,8 +18,8 @@ don't count. Past the limit, the bot asks you to wait a few seconds.
 |---|---|---|
 | `/about` | private | What PlasmaTrack is, its license and the map credits. Works for everyone. |
 | `/token new` | private | Links your Discord account and gives you a token for the desktop tracker. If you already have one, it asks before replacing it, since the old one stops working. |
-| `/download` | private | A personal link to PlasmaTrack Setup for Windows, valid for an hour, with install steps. Only for the roles that may use the bot; the server has no public setup link. After installing, PlasmaTrack updates itself. |
-| `/uninstall [private]` | public | How to remove PlasmaTrack: Windows Installed apps (0.2.1 and newer), or the uninstaller, which anyone can download. Works for everyone in the server, without a role. |
+| `/download [platform]` | private | A personal link, valid for an hour, with install steps. `platform` is `windows` (default: PlasmaTrack Setup, which then updates itself) or `linux` (a `.tar.gz` with `install.sh`, for ETS2/ATS under Proton; no automatic update, and a self-built client's jobs are discarded). Only for the roles that may use the bot; the server has no public link. |
+| `/uninstall [private]` | public | How to remove PlasmaTrack. Windows: Installed apps (0.2.1 and newer), or the uninstaller, which anyone can download. Linux: `~/.local/share/plasmatrack/bin/uninstall.sh [--delete-data]`. Works for everyone in the server, without a role. |
 | `/token status` | private | When your token was made and last used. Never the token itself. |
 | `/token revoke` | private | Stops your token from working (asks first). |
 | `/name name:` | private | The name shown for you on leaderboards (2–32 characters). |

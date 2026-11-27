@@ -130,6 +130,9 @@ interface RequestOptions {
   actor?: string;
 }
 
+/** The operating system a client release is for. */
+export type ClientPlatform = 'windows' | 'linux';
+
 export class PlasmaTrackApi {
   private readonly baseUrl: string;
   private readonly token: string;
@@ -226,7 +229,7 @@ export class PlasmaTrackApi {
 
   /** A valid or approved tracked job's series, without reverted parts (404 for any other job). */
   /** A personal, hour-long setup link for a player (404 before any setup is published). */
-  getClientDownload(discordId: string, platform: 'windows' = 'windows') {
+  getClientDownload(discordId: string, platform: ClientPlatform = 'windows') {
     return this.request('GET', `/players/${discordId}/client-download`, clientDownloadSchema, { query: { platform } });
   }
 
