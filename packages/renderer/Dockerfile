@@ -12,7 +12,7 @@
 #
 # Ubuntu 24.04 because MapLibre Native's prebuilt Linux binary targets it.
 
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b
 
 ARG NODE_VERSION=24.21.0
 
