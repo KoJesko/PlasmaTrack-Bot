@@ -136,6 +136,8 @@ export class MockPlasmaTrackServer {
   readonly releases: Json[] = [];
   /** The newest offered client release (PUBLIC_API §7); null before any is published. */
   client: { version: string; setupBytes: number } | null = { version: '0.2.1', setupBytes: 103_203_097 };
+  /** The newest Linux package; null before one is published. */
+  linuxClient: { version: string; setupBytes: number } | null = { version: '0.2.6', setupBytes: 4_194_304 };
   readonly revocations = new Map<string, Json>();
   readonly operations = new Map<string, Json>();
   /** TruckersMP account IDs the tracker reported, per Discord ID. */
@@ -341,17 +343,19 @@ export class MockPlasmaTrackServer {
     // ---- downloading PlasmaTrack (PUBLIC_API §7)
     if ((m = /^\/players\/(\d{17,20})\/client-download$/.exec(path)) && method === 'GET') {
       if (this.players.get(m[1]!)?.disabled) return err(403, 'forbidden', { reason: 'disabled' });
-      if (!this.client) return err(404, 'not_found', { resource: 'release' });
-      const { version, setupBytes } = this.client;
-      const file = `PlasmaTrack-Setup-${version}.exe`;
+      const platform = q.get('platform') === 'linux' ? 'linux' : 'windows';
+      const release = platform === 'linux' ? this.linuxClient : this.client;
+      if (!release) return err(404, 'not_found', { resource: 'release' });
+      const { version, setupBytes } = release;
+      const file = platform === 'linux' ? `PlasmaTrack-${version}-linux-x86_64.tar.gz` : `PlasmaTrack-Setup-${version}.exe`;
       return ok({
-        platform: 'windows',
-        release_id: `rel_${version.replace(/\./g, '_')}_windows`,
+        platform,
+        release_id: `rel_${version.replace(/\./g, '_')}_${platform}`,
         version,
         notes: 'Uploads resume faster after a network outage.',
         file_name: file,
         bytes: setupBytes,
-        url: `${BASE_URL}/dl/releases/windows/${version}/${file}?exp=1792000000&sig=${m[1]}`,
+        url: `${BASE_URL}/dl/releases/${platform}/${version}/${file}?exp=1792000000&sig=${m[1]}`,
         expires_at: '2026-10-14T10:20:11.000Z',
       });
     }

@@ -56,6 +56,31 @@ describe('/download', () => {
     expect(button.url).toContain(PLAYER_ID); // personal (the mock signs with the player's ID)
   });
 
+  it('gives Linux players the package, with install.sh steps and no SmartScreen note', async () => {
+    const s = setup();
+    const { sent } = await s.run('download', { options: [{ name: 'platform', type: 3, value: 'linux' }] });
+    expect(sent!.flags! & EPHEMERAL).toBeTruthy();
+    expect(s.server.calls.at(-1)!.path).toContain('platform=linux');
+    const embed = sent!.embeds![0]!;
+    expect(embed.title).toBe('PlasmaTrack 0.2.6 for Linux');
+    expect(embed.description).toContain('tar -xzf PlasmaTrack-0.2.6-linux-x86_64.tar.gz');
+    expect(embed.description).toContain('cd PlasmaTrack-0.2.6-linux-x86_64\n');
+    expect(embed.description).toContain(`./install.sh --server-url ${new URL(BASE_URL).origin}`);
+    expect(embed.description).toContain('`/token new`');
+    expect(embed.description).not.toContain('More info');
+    expect(embed.description).not.toContain('updates itself');
+    expect(sent!.components![0]!.components[0]!.url).toContain('/dl/releases/linux/0.2.6/PlasmaTrack-0.2.6-linux-x86_64.tar.gz?exp=');
+  });
+
+  it('asks for Windows by default, and says when there is no Linux package', async () => {
+    const s = setup();
+    await s.run('download');
+    expect(s.server.calls.at(-1)!.path).toContain('platform=windows');
+    s.server.linuxClient = null;
+    const { sent } = await s.run('download', { options: [{ name: 'platform', type: 3, value: 'linux' }] });
+    expect(sent!.content).toBe('No PlasmaTrack package for Linux has been published yet. Ask a moderator.');
+  });
+
   it('is refused without an allowed role, before the server is asked', async () => {
     const s = setup();
     const { response } = await s.run('download', { roles: [] });
@@ -83,6 +108,7 @@ describe('/uninstall', () => {
     const text = sent!.embeds![0]!.description!;
     expect(text).toContain('Installed apps');
     expect(text).toContain('download the uninstaller (1.6 MB)');
+    expect(text).toContain('~/.local/share/plasmatrack/bin/uninstall.sh');
     const button = sent!.components![0]!.components[0]!;
     expect(button.style).toBe(5);
     expect(button.url).toMatch(/\/dl\/uninstall\/windows$/);

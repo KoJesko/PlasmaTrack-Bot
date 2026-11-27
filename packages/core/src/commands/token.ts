@@ -132,7 +132,7 @@ export const tokenNewTask: TaskDefinition = {
         return {
           message: ephemeral(
             confirmMessage(
-              'You already have a token. A new one replaces it: the old one stops working at once, so you’ll need to paste the new one into PlasmaTrack Setup.',
+              'You already have a token. A new one replaces it: the old one stops working at once, so you’ll need to give PlasmaTrack the new one.',
               'tok-new',
               'Replace my token',
             ),
@@ -167,7 +167,7 @@ export function tokenMessage(issued: TokenIssue): OutgoingMessage {
       '```',
       issued.token.token,
       '```',
-      'Paste it into **PlasmaTrack Setup** (get it with `/download`). Keep it secret: anyone with it can upload jobs as you.',
+      'Paste it into **PlasmaTrack Setup**, or give it to `install.sh` on Linux (get either with `/download`). Keep it secret: anyone with it can upload jobs as you.',
       'Lost it? Run `/token new` for a new one (the old one then stops working).',
     ].join('\n'),
     components: [],
